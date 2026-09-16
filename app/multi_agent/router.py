@@ -59,8 +59,13 @@ class Router:
             # 时 content 恒为 ''，路由 100% 走兜底）。
             # 2026-09-16 评测实测：512 对高歧义输入仍不够——multiturn_reference_price
             # 第 7 次调用 completion=512、finish_reason=length（思考吃光预算、输出被截断），
-            # 该用例路由/过程分长期不稳。上调至 2048：max_tokens 只是上限，正常输出
-            # 仍只有几十 token，不产生额外成本，只为消除截断风险。
+            # 该用例路由/过程分长期不稳。
+            # 2026-09-16 二次实测：提到 2048 后 detail_price 的路由调用仍顶格 2048 截断
+            # → 根因是路由未传 reasoning_effort，走服务端默认（偏高的）思考强度。
+            # 修法：路由是轻量分类任务，固定低思考强度（不随子 Agent 的
+            # settings.reasoning_effort 变化——那个配置按设计只作用于子 Agent/Result），
+            # 同时保留 2048 上限作保险。此举同时降低延迟、token 与截断风险。
+            reasoning_effort="low",
             max_tokens=2048,
         )
 
