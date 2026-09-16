@@ -1,3 +1,5 @@
+import os
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
@@ -96,3 +98,20 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ---------- Langfuse 凭证桥接（2026-09-16） ----------
+# 为什么需要：langfuse 的 OpenAI 补丁是 wrapt **类级全局补丁**——只要进程 import 了
+# app.multi_agent（→ orchestrator → from langfuse.openai import openai），所有 OpenAI
+# 调用都会被接入；而 SDK 只从 os.environ 读凭证，pydantic 的 env_file 只把 .env 读进
+# settings 对象。未桥接的后果：未被 load_dotenv 的入口（router/rag 评测、build_* 脚本）
+# 里 SDK 取不到 public_key → 静默禁用上报 + 每次调用打印一条告警。
+# 这里统一下沉到 settings：任何入口 import settings 即生效（setdefault 保证 shell 显式变量优先）。
+# 注意 SDK 同时认 LANGFUSE_BASE_URL 与 LANGFUSE_HOST（langfuse/_client/client.py），
+# 项目 .env 用的是带 base_url 字段的 LANGFUSE_BASE_URL。
+for _key, _value in (
+    ("LANGFUSE_BASE_URL", settings.langfuse_base_url),
+    ("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key),
+    ("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key),
+):
+    if _value:
+        os.environ.setdefault(_key, _value)

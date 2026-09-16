@@ -29,11 +29,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-# 把 .env 写进 os.environ——pydantic 的 env_file 只读进 settings 对象，
-# 而 Langfuse SDK 只认 os.environ（LANGFUSE_HOST / PUBLIC_KEY / SECRET_KEY）
-from dotenv import load_dotenv  # noqa: E402
-load_dotenv(ROOT / ".env")
-
+# Langfuse 凭证由 app.config.settings 统一桥接进 os.environ（见 settings.py 末尾的
+# 桥接段），各入口脚本无需再自行 load_dotenv——避免多入口漏加载导致上报静默失效
 from app.config.settings import settings  # noqa: E402
 from app.evaluation.dataset import load_dataset  # noqa: E402
 from app.evaluation.evaluator import Evaluator  # noqa: E402
