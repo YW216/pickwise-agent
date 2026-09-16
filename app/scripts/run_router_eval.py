@@ -29,6 +29,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Router 路由准确率专业评测")
     parser.add_argument("--cases-file", default=str(ROOT / "app" / "evaluation" / "router_cases.json"))
     parser.add_argument("--report", default=None, help="Markdown 报告输出路径（可选）")
+    parser.add_argument(
+        "--min-accuracy", type=float, default=None,
+        help="准确率门槛（如 0.98）；低于门槛退出码 1，供 CI 门禁使用",
+    )
     args = parser.parse_args()
 
     cases = load_router_cases(args.cases_file)
@@ -119,6 +123,18 @@ def main() -> None:
         Path(args.report).parent.mkdir(parents=True, exist_ok=True)
         Path(args.report).write_text("\n".join(lines), encoding="utf-8")
         print(f"\n报告已导出: {args.report}")
+
+    # ---------- 退出码（批次 3：CI 门禁前置）----------
+    # 0 = 全部通过；1 = 有失败用例。当前基线是 100%，任何回归都会立刻让 CI 变红。
+    accuracy = n_ok / n if n else 0.0
+    if args.min_accuracy is not None and accuracy < args.min_accuracy:
+        print(f"\n❌ 准确率 {accuracy:.1%} 低于门槛 {args.min_accuracy:.0%}")
+        sys.exit(1)
+    if n_ok != n:
+        print(f"\n❌ 存在失败用例：{n - n_ok} 条（见上失败分析）")
+        sys.exit(1)
+    print(f"\n✅ 全部通过（准确率 {accuracy:.1%}）")
+    sys.exit(0)
 
 
 if __name__ == "__main__":

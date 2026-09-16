@@ -166,16 +166,19 @@ def _print_report(report) -> None:
     if all_checks:
         print(f"  断言全貌      : {len(all_checks) - len(failed_checks)}/{len(all_checks)} 项检查通过")
 
-    # 截断诊断：finish_reason≠stop 的调用是"回复中途断掉"类问题的唯一线索（批次 2.5）
+    # 截断诊断：finish_reason 非正常结束的调用（tool_calls 是 ReAct 正常原因，不算异常）
     abnormal = [
         (r.case_id, r.trace.abnormal_llm_calls)
         for r in report.results if r.trace and r.trace.abnormal_llm_calls
     ]
     if abnormal:
-        detail = "、".join(f"{cid}×{len(calls)}" for cid, calls in abnormal)
-        reasons = sorted({c.finish_reason for _, calls in abnormal for c in calls})
-        print(f"  ⚠️  非正常结束的 LLM 调用: {sum(len(c) for _, c in abnormal)} 次（{detail}）")
-        print(f"     finish_reason={','.join(reasons)} —— length=输出被截断（回复中途断掉）")
+        total = sum(len(calls) for _, calls in abnormal)
+        print(f"  ⚠️  非正常结束的 LLM 调用: {total} 次")
+        for cid, calls in abnormal:
+            for c in calls:
+                print(f"       - {cid} · {c.purpose} · completion={c.completion_tokens} "
+                      f"· finish_reason={c.finish_reason}")
+        print("     length=输出被截断（回复中途断掉 / 决策预算被思考吃光）")
 
     print("\n" + "=" * 78)
     print("  逐条明细")
@@ -257,6 +260,18 @@ def main() -> None:
 
     if not args.no_save:
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        # 清理已下线用例的陈旧轨迹：全量跑批时删除不属于本轮用例集的旧文件，
+        # 否则后续分析会把历史文件当成本轮结果（2026-09-16 误判过一次）
+        if not args.case_id:
+            keep = {f"{r.case_id}.json" for r in report.results if r.trace}
+            stale = [
+                p for p in RUNS_DIR.glob("*.json")
+                if p.name not in keep and p.name != "report.json"
+            ]
+            for p in stale:
+                p.unlink()
+            if stale:
+                print(f"   清理陈旧轨迹 {len(stale)} 个: {', '.join(p.stem for p in stale)}")
         for r in report.results:
             if r.trace is None:
                 continue

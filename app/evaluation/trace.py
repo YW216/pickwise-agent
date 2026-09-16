@@ -71,8 +71,16 @@ class RunTrace:
 
     @property
     def abnormal_llm_calls(self) -> list[LLMCallRecord]:
-        """非正常结束（finish_reason≠stop）的 LLM 调用——回复截断类问题的诊断入口。"""
-        return [c for c in self.llm_calls if c.finish_reason and c.finish_reason != "stop"]
+        """非正常结束的 LLM 调用——输出被截断类问题的诊断入口。
+
+        判据细化（2026-09-16 实测）：`tool_calls` 是 ReAct 请求工具的**正常**结束
+        原因（该轮跑批 46/128 次），≠stop 不等于异常；只有 length（预算被吃光/
+        输出截断）、content_filter 等才算异常。空字符串 = 未采集到，不判异常。
+        """
+        return [
+            c for c in self.llm_calls
+            if c.finish_reason and c.finish_reason not in ("stop", "tool_calls")
+        ]
 
     @property
     def all_replies_text(self) -> str:

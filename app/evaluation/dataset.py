@@ -32,6 +32,10 @@ class EvalCase:
     expected_route: list[str] | None = None  # 每轮期望路由（与 turns 对齐）；每轮为场景名，
     # 支持 "presale|consult" 表示二选一皆可；None=不判
     expected_tools: list[str] | None = None  # any-of：至少调用其一；空列表=必须零工具调用；None=不判
+    # expected_tools 的判定口径：True=要求至少一次「成功」调用（success=true，默认）；
+    # False=只要求「发起过调用」（成功与否不论）——用于「查无结果」类用例，此时工具
+    # 合法返回 success=false，按成功口径判会让正确行为必挂（no_match_honesty 的教训）
+    tools_success_required: bool = True
 
     # ---------- 质量断言：数值保真 ----------
     reply_prices_within: dict | None = None  # {"category": "耳机", "max_price": 1500, "last_turn_only": true}

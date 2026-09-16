@@ -159,6 +159,15 @@ def test_rule_content_checks():
     r = _check("tools", case, _trace(["……"], tools=["search_products"]))
     ( _ok if r.passed else _fail)("成功调用命中")
 
+    # tools_success_required=False：查无结果类用例按"发起过调用"判定（no_match_honesty 教训）
+    case = EvalCase(id="t", category="边界", description="t", turns=["x"],
+                    expected_tools=["search_catalog", "search_products"],
+                    tools_success_required=False)
+    r = _check("tools", case, _trace(["……"], failed_tools=["search_products"]))
+    ( _ok if r.passed else _fail)(f"查无结果类：失败调用也算命中: {r.detail}")
+    r = _check("tools", case, _trace(["……"]))
+    ( _ok if not r.passed else _fail)(f"查无结果类：完全没调用仍不通过: {r.detail}")
+
     # result 为 dict（沙箱采集的真实形态）与 JSON 串（序列化形态）都算命中
     dict_obs = ToolObservation(name="search_products", arguments={},
                                result={"success": True, "data": {}})

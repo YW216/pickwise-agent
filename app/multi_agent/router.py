@@ -56,8 +56,12 @@ class Router:
             temperature=0.0,
             # 推理模型（deepseek-v4-flash）的 reasoning_content 与 content 共享
             # max_tokens 预算：预算太小会被思考吃光导致正文为空（实测 max_tokens=20
-            # 时 content 恒为 ''，路由 100% 走兜底）。512 足够容纳思考 + 场景词输出
-            max_tokens=512,
+            # 时 content 恒为 ''，路由 100% 走兜底）。
+            # 2026-09-16 评测实测：512 对高歧义输入仍不够——multiturn_reference_price
+            # 第 7 次调用 completion=512、finish_reason=length（思考吃光预算、输出被截断），
+            # 该用例路由/过程分长期不稳。上调至 2048：max_tokens 只是上限，正常输出
+            # 仍只有几十 token，不产生额外成本，只为消除截断风险。
+            max_tokens=2048,
         )
 
         raw = (response.choices[0].message.content or "").strip()

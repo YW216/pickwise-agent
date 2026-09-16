@@ -222,6 +222,7 @@
         "search_catalog",
         "search_products"
       ],
+      "tools_success_required": false,
       "valid_ids_only": true,
       "judge_aspects": [
         "answer_quality",

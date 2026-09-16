@@ -116,22 +116,29 @@ def successful_tool_names(trace: RunTrace) -> list[str]:
 
 
 def check_tools(case: EvalCase, trace: RunTrace) -> CheckResult:
-    """工具行为：非空列表=any-of 至少成功调其一；空列表=必须零工具调用；None=不判。"""
+    """工具行为：非空列表=any-of 至少命中其一；空列表=必须零工具调用；None=不判。
+
+    命中口径由 case.tools_success_required 决定：
+    - True（默认）：至少一次「成功」调用（success=true）——失败调用不算信息需求被满足；
+    - False：只要求「发起过调用」——用于查无结果类用例（工具合法返回 success=false，
+      按成功口径判会让正确行为必挂，no_match_honesty 的教训）。
+    """
     if case.expected_tools is None:
         return CheckResult.skip("tools")
     called = trace.tool_call_names
     succeeded = successful_tool_names(trace)
     if case.expected_tools:
-        if not set(case.expected_tools) & set(succeeded):
+        hits = (set(case.expected_tools) & set(succeeded)) if case.tools_success_required \
+            else (set(case.expected_tools) & set(called))
+        if not hits:
+            criterion = "成功调用" if case.tools_success_required else "调用（失败也算）"
             return CheckResult.of(
                 "tools", False,
-                f"期望工具均未成功调用：{case.expected_tools}"
+                f"期望工具均未{criterion}：{case.expected_tools}"
                 f"（实际调用：{called or '无'}，其中成功：{sorted(set(succeeded)) or '无'}）",
             )
-        return CheckResult.of(
-            "tools", True,
-            f"成功命中 {sorted(set(case.expected_tools) & set(succeeded))}",
-        )
+        note = "" if case.tools_success_required else "（查无结果类用例：只判是否发起调用）"
+        return CheckResult.of("tools", True, f"命中 {sorted(hits)}{note}")
     if called:
         return CheckResult.of("tools", False, f"不应调用工具，实际调用了：{called}")
     return CheckResult.of("tools", True, "未调用工具（符合预期）")

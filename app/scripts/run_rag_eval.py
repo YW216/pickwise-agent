@@ -21,15 +21,21 @@ _hybrid_product_ids），保证测的就是线上行为。
   python app/scripts/run_rag_eval.py                # 三方全跑，top_k=5（生产口径）
   python app/scripts/run_rag_eval.py --top-k 3     # 严格口径
   python app/scripts/run_rag_eval.py --limit 10     # 冒烟：只跑前 10 条 approved
+
+产出：终端对照表 + app/evaluation/runs/rag_report.json（三模式指标与未命中清单，
+供 run-to-run 对比；--no-save 可关闭）；未命中清单也逐模式打印，便于定位语料缺口。
 """
 
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
+
+RUNS_DIR = ROOT / "app" / "evaluation" / "runs"
 
 from pymilvus import MilvusClient  # noqa: E402
 
@@ -84,6 +90,10 @@ def main():
     parser.add_argument(
         "--include-pending", action="store_true",
         help="把 pending 状态的 case 也纳入评测（新生成未抽检时的基线口径）",
+    )
+    parser.add_argument(
+        "--no-save", action="store_true",
+        help="不落盘 runs/rag_report.json（默认落盘，供 run-to-run 对比）",
     )
     args = parser.parse_args()
 
@@ -232,6 +242,51 @@ def main():
         if misses[mode]:
             print(f"[{mode}] 未命中: {', '.join(misses[mode])}")
     print(f"\n基线完成。验收流程固定化：改动 → 重跑本脚本 → 对照本表。")
+
+    # ---------- 结果落盘（批次 3）：供 run-to-run 对比，别再只活在终端里 ----------
+    if not args.no_save:
+        RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "run_at": datetime.now().isoformat(timespec="seconds"),
+            "top_k": args.top_k,
+            "wide_recall": args.wide_recall,
+            "included": {
+                "knowledge": len(knowledge_cases),
+                "product": len(product_cases),
+                "negatives": len(negatives),
+                "include_pending": args.include_pending,
+            },
+            "modes": {
+                mode: {
+                    "knowledge": {
+                        "n": len(stats[mode]["knowledge"]),
+                        "hit_at_k": _mean([h for h, _ in stats[mode]["knowledge"]]),
+                        "mrr": _mean([m for _, m in stats[mode]["knowledge"]]),
+                        "doc_recall": _mean(stats[mode]["k_doc_recall"]),
+                        "doc_precision": _mean(stats[mode]["k_doc_precision"]),
+                    },
+                    "product": {
+                        "n": len(stats[mode]["product"]),
+                        "hit_at_k": _mean([h for h, _, _ in stats[mode]["product"]]),
+                        "mrr": _mean([m for _, m, _ in stats[mode]["product"]]),
+                        "precision": _mean([pr for _, _, pr in stats[mode]["product"]]),
+                    },
+                    "misses": misses[mode],
+                }
+                for mode in MODES
+            },
+        }
+        # 归一化文件名的模式键（hybrid-narrow → hybrid_narrow），便于 jq 取值
+        for mode in MODES:
+            out = RUNS_DIR / f"rag_{mode.replace('-', '_')}.json"
+            out.write_text(
+                json.dumps({**summary, "mode": mode}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        (RUNS_DIR / "rag_report.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"\n结果已落盘: {RUNS_DIR / 'rag_report.json'}（含三模式指标与未命中清单）")
 
 
 if __name__ == "__main__":
