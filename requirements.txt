@@ -1,0 +1,10 @@
+openai>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+mcp>=1.8.0
+# pymilvus 3.0 为大版本且与共用环境里的 langchain-milvus<3.0 冲突，锁定 2.x 稳定线
+pymilvus[milvus-lite]>=2.6,<3.0
+
+# 真值层数据库驱动（PostgreSQL，2026-09-15 商品落库）
+psycopg[binary]>=3.1

@@ -1,0 +1,2122 @@
+{
+  "meta": {
+    "generated_by": "build_rag_cases.py",
+    "model": "deepseek-v4-flash",
+    "knowledge": 49,
+    "product": 98,
+    "negative": 5,
+    "failed": 2,
+    "note": "review_status=pending：人工抽检通过后改为 approved；评测脚本只跑 approved",
+    "review_note": "商品多标注批次经用户裁定免抽检直接采用（2026-09-14）",
+    "price_annotated": {
+      "total": 98,
+      "with_max_price": 78,
+      "note": "对齐生产：Agent 从 query 识别价格意图后传 max_price 标量过滤"
+    },
+    "labels_completed": {
+      "total": 98,
+      "expanded": 26,
+      "note": "标注补全：miss 的 top5 由 LLM 复核，只扩不缩；扩集合记录在 review_note 供审计"
+    }
+  },
+  "cases": [
+    {
+      "case_id": "KC-001",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "会员权益",
+      "expected_section": "一、会员等级体系",
+      "source_chunk_id": "会员权益#01-00",
+      "review_status": "approved",
+      "query": "并夕夕会员等级怎么算？看近12个月花了多少钱吗？每月1号更新？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-002",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "会员权益",
+      "expected_section": "二、各等级核心权益",
+      "source_chunk_id": "会员权益#02-00",
+      "review_status": "approved",
+      "query": "我住在偏远地区，钻石会员下单能包邮吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-003",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "会员权益",
+      "expected_section": "三、积分体系",
+      "source_chunk_id": "会员权益#03-00",
+      "review_status": "approved",
+      "query": "签到和晒图哪个给分多？积分能抵现金吗？会过期吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-004",
+      "type": "knowledge",
+      "style": "参数关注",
+      "expected_doc": "会员权益",
+      "expected_section": "四、生日特权",
+      "source_chunk_id": "会员权益#04-00",
+      "review_status": "approved",
+      "query": "黄金会员生日当天可以领多少元无门槛券？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-005",
+      "type": "knowledge",
+      "style": "场景描述",
+      "expected_doc": "会员权益",
+      "expected_section": "五、常见问题",
+      "source_chunk_id": "会员权益#05-00",
+      "review_status": "approved",
+      "query": "我退了几笔订单，会员升级累计的实付金额会被扣减吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-006",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "屏幕面板科普",
+      "expected_section": "二、OLED 与 IPS 的核心区别",
+      "source_chunk_id": "屏幕面板科普#00-00",
+      "review_status": "approved",
+      "query": "OLED和IPS屏幕哪个更好？区别大吗？",
+      "review_note": "query 保留；期望标注修正：概览块无实质内容，改指核心区别块（人工修正标注）"
+    },
+    {
+      "case_id": "KC-007",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "屏幕面板科普",
+      "expected_section": "一、三大主流面板：OLED / IPS / LED",
+      "source_chunk_id": "屏幕面板科普#01-00",
+      "review_status": "approved",
+      "query": "我想买高端笔记本，OLED、IPS和Mini-LED屏幕面板有什么区别？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-008",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "屏幕面板科普",
+      "expected_section": "二、OLED 与 IPS 的核心区别",
+      "source_chunk_id": "屏幕面板科普#02-00",
+      "review_status": "approved",
+      "query": "OLED和IPS屏幕在黑色表现和响应速度上有什么区别，选哪个好？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-009",
+      "type": "knowledge",
+      "style": "参数关注",
+      "expected_doc": "屏幕面板科普",
+      "expected_section": "三、OLED 的短板（必须如实告知）",
+      "source_chunk_id": "屏幕面板科普#03-00",
+      "review_status": "approved",
+      "query": "OLED 屏幕在纯白画面下亮度会被限制吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-010",
+      "type": "knowledge",
+      "style": "场景描述",
+      "expected_doc": "屏幕面板科普",
+      "expected_section": "四、分辨率与像素密度",
+      "source_chunk_id": "屏幕面板科普#04-00",
+      "review_status": "approved",
+      "query": "我平时用14寸笔记本办公，纠结选1080P还是2K屏，哪个更合适？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-011",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "屏幕面板科普",
+      "expected_section": "五、刷新率：感知最直接的参数",
+      "source_chunk_id": "屏幕面板科普#05-00",
+      "review_status": "approved",
+      "query": "买笔记本，屏幕刷新率多少够用？高刷会不会更耗电？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-012",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "屏幕面板科普",
+      "expected_section": "六、给用户的一句话总结",
+      "source_chunk_id": "屏幕面板科普#06-00",
+      "review_status": "approved",
+      "query": "我预算充足，主要用来看电影和打游戏，该选哪种屏幕面板？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-013",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "常见问题FAQ",
+      "expected_section": "一、订单与支付",
+      "source_chunk_id": "常见问题FAQ#01-00",
+      "review_status": "approved",
+      "query": "微信、支付宝和花呗分期都能付款吗？普通商品几天发货？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-015",
+      "type": "knowledge",
+      "style": "场景描述",
+      "expected_doc": "常见问题FAQ",
+      "expected_section": "三、售后服务",
+      "source_chunk_id": "常见问题FAQ#03-00",
+      "review_status": "approved",
+      "query": "我退货寄回的包裹被快递弄丢了，凭丢件证明找客服能退款吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-016",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "常见问题FAQ",
+      "expected_section": "四、账户与安全",
+      "source_chunk_id": "常见问题FAQ#04-00",
+      "review_status": "approved",
+      "query": "我手机号停用了，密码忘了咋办啊？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-017",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "手机选购指南",
+      "expected_section": "并夕夕 手机选购指南 · 概览",
+      "source_chunk_id": "手机选购指南#00-00",
+      "review_status": "rejected",
+      "query": "我准备换手机，这个选购指南能帮我做哪些需求拆解和参数解答？",
+      "review_note": "query 不像真实用户问法（用户不会问指南能帮什么），期望又是低密度概览块"
+    },
+    {
+      "case_id": "KC-018",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "手机选购指南",
+      "expected_section": "一、四大核心维度与优先级",
+      "source_chunk_id": "手机选购指南#01-00",
+      "review_status": "approved",
+      "query": "日常使用和重度游戏，选手机时优先看的参数有什么不同？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-019",
+      "type": "knowledge",
+      "style": "参数关注",
+      "expected_doc": "手机选购指南",
+      "expected_section": "二、处理器：性能的天花板",
+      "source_chunk_id": "手机选购指南#02-00",
+      "review_status": "approved",
+      "query": "玩原神满帧高画质，手机处理器该选什么级别？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-020",
+      "type": "knowledge",
+      "style": "场景描述",
+      "expected_doc": "手机选购指南",
+      "expected_section": "三、影像系统：不只看像素",
+      "source_chunk_id": "手机选购指南#03-00",
+      "review_status": "approved",
+      "query": "想买手机拍照，一亿像素到底好不好，晚上拍会不会很糊？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-021",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "手机选购指南",
+      "expected_section": "四、屏幕：日常感知最强的部件",
+      "source_chunk_id": "手机选购指南#04-00",
+      "review_status": "approved",
+      "query": "太阳底下手机屏幕总看不清，买的时候该看哪个亮度参数啊？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-022",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "手机选购指南",
+      "expected_section": "五、续航与充电",
+      "source_chunk_id": "手机选购指南#05-00",
+      "review_status": "approved",
+      "query": "我经常出差，想要大电池手机，5000mAh够吗？快充66W和120W哪个好？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-023",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "手机选购指南",
+      "expected_section": "六、内存与存储",
+      "source_chunk_id": "手机选购指南#06-00",
+      "review_status": "approved",
+      "query": "预算有限，手机选大存储小内存还是大内存小存储？内存8GB和12GB怎么选？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-025",
+      "type": "knowledge",
+      "style": "场景描述",
+      "expected_doc": "笔记本选购指南",
+      "expected_section": "一、先定场景，再看配置",
+      "source_chunk_id": "笔记本选购指南#00-00",
+      "review_status": "approved",
+      "query": "我准备买笔记本，不知道该怎么选，能按使用场景帮我看看配置够不够吗？",
+      "review_note": "query 保留（真实用户问法）；期望标注修正：概览块→一、先定场景（实质答案所在）"
+    },
+    {
+      "case_id": "KC-026",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "笔记本选购指南",
+      "expected_section": "一、先定场景，再看配置",
+      "source_chunk_id": "笔记本选购指南#01-00",
+      "review_status": "approved",
+      "query": "我打算买个笔记本，平时就办公上网课，该重点看啥配置？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-027",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "笔记本选购指南",
+      "expected_section": "二、处理器（CPU）怎么选",
+      "source_chunk_id": "笔记本选购指南#02-00",
+      "review_status": "approved",
+      "query": "我要编程编译和视频渲染，笔记本CPU选几核合适？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-028",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "笔记本选购指南",
+      "expected_section": "三、显卡：核显与独显的边界",
+      "source_chunk_id": "笔记本选购指南#03-00",
+      "review_status": "approved",
+      "query": "买笔记本，核显和独显选哪个？平时办公和玩卡牌游戏，核显够吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-029",
+      "type": "knowledge",
+      "style": "参数关注",
+      "expected_doc": "笔记本选购指南",
+      "expected_section": "四、内存与硬盘",
+      "source_chunk_id": "笔记本选购指南#04-00",
+      "review_status": "approved",
+      "query": "现在买笔记本内存到底该选16GB还是32GB？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-031",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "笔记本选购指南",
+      "expected_section": "六、便携三要素",
+      "source_chunk_id": "笔记本选购指南#06-00",
+      "review_status": "approved",
+      "query": "笔记本多重算轻薄？续航标称值要打几折？充电器能跟手机共用吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-032",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "笔记本选购指南",
+      "expected_section": "七、常见误区提醒",
+      "source_chunk_id": "笔记本选购指南#07-00",
+      "review_status": "approved",
+      "query": "我主要用来办公，有必要买独立显卡的笔记本吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-033",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "耳机选购指南",
+      "expected_section": "并夕夕 耳机选购指南 · 概览",
+      "source_chunk_id": "耳机选购指南#00-00",
+      "review_status": "rejected",
+      "query": "耳机选购时，不同品类、核心参数和场景适配该怎么比较选择？",
+      "review_note": "元 query（复述指南目录结构），不像真实用户问法；期望概览块低价值"
+    },
+    {
+      "case_id": "KC-034",
+      "type": "knowledge",
+      "style": "参数关注",
+      "expected_doc": "耳机选购指南",
+      "expected_section": "一、先分清三大佩戴形态",
+      "source_chunk_id": "耳机选购指南#01-00",
+      "review_status": "approved",
+      "query": "入耳式耳机长时间佩戴会不会胀耳朵？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-035",
+      "type": "knowledge",
+      "style": "场景描述",
+      "expected_doc": "耳机选购指南",
+      "expected_section": "二、主动降噪（ANC）常识",
+      "source_chunk_id": "耳机选购指南#02-00",
+      "review_status": "approved",
+      "query": "地铁通勤时，降噪耳机能抵消地铁轰鸣声吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-036",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "耳机选购指南",
+      "expected_section": "三、音质三要素（通俗版）",
+      "source_chunk_id": "耳机选购指南#03-00",
+      "review_status": "approved",
+      "query": "我想买个听流行歌的耳机，是不是得挑低频量足的？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-037",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "耳机选购指南",
+      "expected_section": "四、场景对号入座",
+      "source_chunk_id": "耳机选购指南#04-00",
+      "review_status": "approved",
+      "query": "打游戏想买低延迟带麦克风的耳机，该怎么选？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-038",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "耳机选购指南",
+      "expected_section": "五、无线连接与续航",
+      "source_chunk_id": "耳机选购指南#05-00",
+      "review_status": "approved",
+      "query": "选蓝牙耳机，5.3和5.0差别大吗？双设备连接实用吗？续航一般多久？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-039",
+      "type": "knowledge",
+      "style": "参数关注",
+      "expected_doc": "耳机选购指南",
+      "expected_section": "六、常见误区提醒",
+      "source_chunk_id": "耳机选购指南#06-00",
+      "review_status": "approved",
+      "query": "无线耳机延迟超过多少毫秒会导致游戏音画不同步？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-040",
+      "type": "knowledge",
+      "style": "场景描述",
+      "expected_doc": "退换货政策",
+      "expected_section": "一、七天无理由退货",
+      "source_chunk_id": "退换货政策#01-00",
+      "review_status": "approved",
+      "query": "我买的口红拆封了还能申请七天无理由退货吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-041",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "退换货政策",
+      "expected_section": "二、质量问题退换货",
+      "source_chunk_id": "退换货政策#02-00",
+      "review_status": "approved",
+      "query": "我买的东西有质量问题，签收后15天内能退换吗？运费谁出？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-042",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "退换货政策",
+      "expected_section": "三、退款流程",
+      "source_chunk_id": "退换货政策#03-00",
+      "review_status": "approved",
+      "query": "我在订单里点了申请退款，审核要多久？钱退到哪里？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-043",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "退换货政策",
+      "expected_section": "四、特殊场景",
+      "source_chunk_id": "退换货政策#04-00",
+      "review_status": "approved",
+      "query": "多件订单能只退一件吗？仅退款和拒收退款哪个更快？时效各是多久？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-044",
+      "type": "knowledge",
+      "style": "参数关注",
+      "expected_doc": "配送说明",
+      "expected_section": "一、配送范围",
+      "source_chunk_id": "配送说明#01-00",
+      "review_status": "approved",
+      "query": "并夕夕发往海南三沙需要额外几个工作日？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-045",
+      "type": "knowledge",
+      "style": "场景描述",
+      "expected_doc": "配送说明",
+      "expected_section": "二、配送时效",
+      "source_chunk_id": "配送说明#02-00",
+      "review_status": "approved",
+      "query": "寄到县级市一般几天能到？当日达和次日达支持吗？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-046",
+      "type": "knowledge",
+      "style": "口语随口问",
+      "expected_doc": "配送说明",
+      "expected_section": "三、运费规则",
+      "source_chunk_id": "配送说明#03-00",
+      "review_status": "approved",
+      "query": "我买的东西不满99块，运费要多少钱啊？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-047",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "配送说明",
+      "expected_section": "四、合作快递",
+      "source_chunk_id": "配送说明#04-00",
+      "review_status": "approved",
+      "query": "下单时能自己选顺丰或京东物流发货吗？在哪看实际承运商？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-048",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "配送说明",
+      "expected_section": "五、收货须知",
+      "source_chunk_id": "配送说明#05-00",
+      "review_status": "approved",
+      "query": "贵重商品是当面验货还是放代收点？签收后破损多久联系客服？",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-049",
+      "type": "knowledge",
+      "style": "参数关注",
+      "expected_doc": "配送说明",
+      "expected_section": "六、配送异常",
+      "source_chunk_id": "配送说明#06-00",
+      "review_status": "approved",
+      "query": "物流轨迹超过多少天没更新可以发起物流催单？",
+      "review_note": ""
+    },
+    {
+      "case_id": "NEG-001",
+      "type": "negative",
+      "query": "请问云章 智阅 X3 Pro 支持内存扩展吗？想买一台办公用。",
+      "invented_model": "云章 智阅 X3 Pro",
+      "review_status": "approved",
+      "review_note": ""
+    },
+    {
+      "case_id": "NEG-002",
+      "type": "negative",
+      "query": "请问苍岭 Tundra X1 Pro 现在有现货吗？它的电池续航大概多久？",
+      "invented_model": "苍岭 Tundra X1 Pro",
+      "review_status": "approved",
+      "review_note": ""
+    },
+    {
+      "case_id": "NEG-003",
+      "type": "negative",
+      "query": "苍岭 SoundMax 9000 回音壁能连接蓝牙吗？",
+      "invented_model": "苍岭 SoundMax 9000",
+      "review_status": "approved",
+      "review_note": ""
+    },
+    {
+      "case_id": "NEG-004",
+      "type": "negative",
+      "query": "请问曜石 T8 Pro 蓝牙耳机的降噪效果怎么样？",
+      "invented_model": "曜石 T8 Pro",
+      "review_status": "approved",
+      "review_note": ""
+    },
+    {
+      "case_id": "NEG-005",
+      "type": "negative",
+      "query": "你好，想问下星海 VX70 Pro 2025款的屏幕刷新率是多少？支持DC调光吗？",
+      "invented_model": "星海 VX70 Pro 2025款",
+      "review_status": "approved",
+      "review_note": ""
+    },
+    {
+      "case_id": "KC-013-2",
+      "type": "knowledge",
+      "style": "对比/咨询",
+      "expected_doc": "常见问题FAQ",
+      "expected_section": "二、商品与价格",
+      "source_chunk_id": "常见问题FAQ#02-00",
+      "review_status": "approved",
+      "query": "商品降价了，签收7天内能退差价吗？秒杀和钻石会员的价保规则有何不同？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用"
+    },
+    {
+      "case_id": "KC-022-2",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "手机选购指南",
+      "expected_section": "七、常见误区提醒",
+      "source_chunk_id": "手机选购指南#07-00",
+      "review_status": "approved",
+      "query": "我手机打算用三四年，系统更新年限重要吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用"
+    },
+    {
+      "case_id": "KC-027-2",
+      "type": "knowledge",
+      "style": "具体需求",
+      "expected_doc": "笔记本选购指南",
+      "expected_section": "五、屏幕参数速查",
+      "source_chunk_id": "笔记本选购指南#05-00",
+      "review_status": "approved",
+      "query": "想买笔记本主要办公和看剧，屏幕色域和亮度选多少合适？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用"
+    },
+    {
+      "case_id": "PC-001",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "LP-01",
+      "expected_product_ids": [
+        "LP-01",
+        "LP-07"
+      ],
+      "source_chunk_id": "LP-01",
+      "review_status": "approved",
+      "query": "想买个星海的 Pro 14 轻薄本，预算 5600 以内，平时办公写代码用。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 5600
+    },
+    {
+      "case_id": "PC-002",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "LP-02",
+      "expected_product_ids": [
+        "LP-02",
+        "LP-12"
+      ],
+      "source_chunk_id": "LP-02",
+      "review_status": "approved",
+      "query": "想找一台适合视频剪辑和设计的大屏高性能本，要15.6英寸2.5K高刷、32GB内存和独显。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-12']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-003",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "LP-03",
+      "expected_product_ids": [
+        "LP-03"
+      ],
+      "source_chunk_id": "LP-03",
+      "review_status": "approved",
+      "query": "想买台13寸、1kg出头、续航约13小时的轻办公本，预算4000内，求推荐。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 4000
+    },
+    {
+      "case_id": "PC-004",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "LP-04",
+      "expected_product_ids": [
+        "LP-04",
+        "LP-17",
+        "LP-21"
+      ],
+      "source_chunk_id": "LP-04",
+      "review_status": "approved",
+      "query": "想买 16 英寸大屏、价格 9000 元左右的笔记本。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 9900
+    },
+    {
+      "case_id": "PC-005",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "LP-05",
+      "expected_product_ids": [
+        "LP-05",
+        "LP-11",
+        "LP-27"
+      ],
+      "source_chunk_id": "LP-05",
+      "review_status": "approved",
+      "query": "想买14英寸、预算四千六以内、适合学生上网课和写文档的轻薄本。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 4600
+    },
+    {
+      "case_id": "PC-006",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "LP-06",
+      "expected_product_ids": [
+        "LP-06",
+        "LP-26"
+      ],
+      "source_chunk_id": "LP-06",
+      "review_status": "approved",
+      "query": "想买个16寸240Hz高刷屏的游戏本，独显大内存，能玩3A能直播，预算一万多。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-26']",
+      "max_price": 19999
+    },
+    {
+      "case_id": "PC-007",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "PH-01",
+      "expected_product_ids": [
+        "PH-01",
+        "PH-12",
+        "PH-16"
+      ],
+      "source_chunk_id": "PH-01",
+      "review_status": "approved",
+      "query": "想买一台三千到四千元的星海手机，作为日常主力机使用。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 4000
+    },
+    {
+      "case_id": "PC-008",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "PH-02",
+      "expected_product_ids": [
+        "PH-02"
+      ],
+      "source_chunk_id": "PH-02",
+      "review_status": "approved",
+      "query": "想找一款6000mAh大电池、带长焦的商务手机，预算5000多，有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 5999
+    },
+    {
+      "case_id": "PC-009",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "PH-03",
+      "expected_product_ids": [
+        "PH-03"
+      ],
+      "source_chunk_id": "PH-03",
+      "review_status": "approved",
+      "query": "想买一款云章品牌、价格在2200元以内的手机",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 2200
+    },
+    {
+      "case_id": "PC-010",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "PH-04",
+      "expected_product_ids": [
+        "PH-04"
+      ],
+      "source_chunk_id": "PH-04",
+      "review_status": "approved",
+      "query": "想找一台有潜望长焦、暗光变焦出色、视频防抖好的影像旗舰手机，预算七千左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 7700
+    },
+    {
+      "case_id": "PC-011",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "PH-05",
+      "expected_product_ids": [
+        "PH-05"
+      ],
+      "source_chunk_id": "PH-05",
+      "review_status": "approved",
+      "query": "想找个一千六左右的小屏手机，轻便单手能拿，给长辈用或当备用机就行。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 1760
+    },
+    {
+      "case_id": "PC-012",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "HP-01",
+      "expected_product_ids": [
+        "HP-01",
+        "HP-16",
+        "HP-19",
+        "HP-28",
+        "HP-32"
+      ],
+      "source_chunk_id": "HP-01",
+      "review_status": "approved",
+      "query": "地铁通勤用，想买千元出头的主动降噪真无线，续航要长一点",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-32', 'HP-19']",
+      "max_price": 1999
+    },
+    {
+      "case_id": "PC-013",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "HP-02",
+      "expected_product_ids": [
+        "HP-02",
+        "HP-13"
+      ],
+      "source_chunk_id": "HP-02",
+      "review_status": "approved",
+      "query": "想买曜石品牌两千元以上的头戴式耳机，哪款降噪和音质更出色？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-014",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "HP-03",
+      "expected_product_ids": [
+        "HP-03",
+        "HP-27"
+      ],
+      "source_chunk_id": "HP-03",
+      "review_status": "approved",
+      "query": "预算700元左右，想买云章品牌的耳机，日常通勤听歌用。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 770
+    },
+    {
+      "case_id": "PC-015",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "HP-04",
+      "expected_product_ids": [
+        "HP-04",
+        "HP-07",
+        "HP-23"
+      ],
+      "source_chunk_id": "HP-04",
+      "review_status": "approved",
+      "query": "打手游想要低延迟声画同步，通勤时又要主动降噪，找一款真无线入耳式耳机。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-23'] | 标注补全 +['HP-07']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-016",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "HP-05",
+      "expected_product_ids": [
+        "HP-01",
+        "HP-05",
+        "HP-07",
+        "HP-16",
+        "HP-19",
+        "HP-27",
+        "HP-28"
+      ],
+      "source_chunk_id": "HP-05",
+      "review_status": "approved",
+      "query": "想买个一千三以内带主动降噪的蓝牙耳机，有啥推荐？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-01', 'HP-27', 'HP-19'] | 标注补全 +['HP-07']",
+      "max_price": 1300
+    },
+    {
+      "case_id": "PC-017",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "LP-07",
+      "expected_product_ids": [
+        "LP-01",
+        "LP-07"
+      ],
+      "source_chunk_id": "LP-07",
+      "review_status": "approved",
+      "query": "14寸轻薄本，高刷高分屏和独显，通勤办公及修图，预算5千多。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 5999
+    },
+    {
+      "case_id": "PC-018",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "LP-08",
+      "expected_product_ids": [
+        "LP-08"
+      ],
+      "source_chunk_id": "LP-08",
+      "review_status": "approved",
+      "query": "想找一台适合程序员、14 英寸、32GB 内存、带独显的笔记本，预算 7000 左右，有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 7700
+    },
+    {
+      "case_id": "PC-019",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "LP-09",
+      "expected_product_ids": [
+        "LP-09",
+        "LP-11",
+        "LP-27"
+      ],
+      "source_chunk_id": "LP-09",
+      "review_status": "approved",
+      "query": "想买14英寸的Air系列轻薄本，预算在4500到4700元之间。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 4700
+    },
+    {
+      "case_id": "PC-020",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "LP-10",
+      "expected_product_ids": [
+        "LP-10",
+        "LP-28"
+      ],
+      "source_chunk_id": "LP-10",
+      "review_status": "approved",
+      "query": "需要16英寸3.2K高刷Mini LED屏、大显存独显，用于三维渲染和视频剪辑。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-28']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-021",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "LP-11",
+      "expected_product_ids": [
+        "LP-09",
+        "LP-11",
+        "LP-27",
+        "LP-32"
+      ],
+      "source_chunk_id": "LP-11",
+      "review_status": "approved",
+      "query": "想搞台14寸2.2K 90Hz、1.28kg、13小时续航的轻薄本，预算4600左右",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-09', 'LP-27'] | 标注补全 +['LP-32']",
+      "max_price": 5060
+    },
+    {
+      "case_id": "PC-022",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "LP-12",
+      "expected_product_ids": [
+        "LP-12",
+        "LP-24",
+        "LP-28"
+      ],
+      "source_chunk_id": "LP-12",
+      "review_status": "approved",
+      "query": "预算7000到8000元，想买15或16英寸大屏笔记本，主要用来玩游戏和剪辑视频",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 8000
+    },
+    {
+      "case_id": "PC-023",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "LP-13",
+      "expected_product_ids": [
+        "LP-10",
+        "LP-13",
+        "LP-26",
+        "LP-28",
+        "LP-34"
+      ],
+      "source_chunk_id": "LP-13",
+      "review_status": "approved",
+      "query": "想选一台 16 英寸大屏、能跑三维渲染的笔记本，预算一万出头，有什么推荐？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-10'] | 标注补全 +['LP-28']",
+      "max_price": 11000
+    },
+    {
+      "case_id": "PC-024",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "LP-14",
+      "expected_product_ids": [
+        "LP-07",
+        "LP-14",
+        "LP-29"
+      ],
+      "source_chunk_id": "LP-14",
+      "review_status": "approved",
+      "query": "14英寸、价格在5500到6000元之间的轻薄本，适合办公和差旅。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 6000
+    },
+    {
+      "case_id": "PC-025",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "LP-15",
+      "expected_product_ids": [
+        "LP-15"
+      ],
+      "source_chunk_id": "LP-15",
+      "review_status": "approved",
+      "query": "14英寸2.5K 120Hz低蓝光屏轻薄本，通勤办公，续航12小时，预算5000左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 5500
+    },
+    {
+      "case_id": "PC-026",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "LP-16",
+      "expected_product_ids": [
+        "LP-16",
+        "LP-20"
+      ],
+      "source_chunk_id": "LP-16",
+      "review_status": "approved",
+      "query": "想买个墨白15寸的大屏办公本，预算五千五左右，有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 6050
+    },
+    {
+      "case_id": "PC-027",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "LP-17",
+      "expected_product_ids": [
+        "LP-17",
+        "LP-21",
+        "LP-28"
+      ],
+      "source_chunk_id": "LP-17",
+      "review_status": "approved",
+      "query": "想买16英寸大屏游戏本，预算8000-9000元，主要玩大型游戏和视频剪辑。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 9000
+    },
+    {
+      "case_id": "PC-028",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "LP-18",
+      "expected_product_ids": [
+        "LP-10",
+        "LP-18"
+      ],
+      "source_chunk_id": "LP-18",
+      "review_status": "approved",
+      "query": "想买苍岭X系列的轻薄本，预算一万一千元上下，求推荐。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 12100
+    },
+    {
+      "case_id": "PC-029",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "LP-19",
+      "expected_product_ids": [
+        "LP-09",
+        "LP-11",
+        "LP-15",
+        "LP-19",
+        "LP-23",
+        "LP-27",
+        "LP-32"
+      ],
+      "source_chunk_id": "LP-19",
+      "review_status": "approved",
+      "query": "14英寸屏幕、售价4699元左右的轻薄笔记本",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-11', 'LP-27'] | 标注补全 +['LP-15', 'LP-23']",
+      "max_price": 5170
+    },
+    {
+      "case_id": "PC-030",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "LP-20",
+      "expected_product_ids": [
+        "LP-20"
+      ],
+      "source_chunk_id": "LP-20",
+      "review_status": "approved",
+      "query": "想找一台15寸大屏办公本，偶尔剪视频，需要独显和大内存，预算5600左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 6160
+    },
+    {
+      "case_id": "PC-031",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "LP-21",
+      "expected_product_ids": [
+        "LP-04",
+        "LP-17",
+        "LP-21",
+        "LP-28"
+      ],
+      "source_chunk_id": "LP-21",
+      "review_status": "approved",
+      "query": "想买个16寸大屏、价格九千左右的笔记本，主要用来渲染建模和打游戏，有啥推荐？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-28']",
+      "max_price": 9900
+    },
+    {
+      "case_id": "PC-032",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "LP-22",
+      "expected_product_ids": [
+        "LP-07",
+        "LP-22"
+      ],
+      "source_chunk_id": "LP-22",
+      "review_status": "approved",
+      "query": "想买14英寸2.8K 120Hz轻薄本，能剪辑玩主流游戏，要独显1TB固态，6499元左右",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-07']",
+      "max_price": 7150
+    },
+    {
+      "case_id": "PC-033",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "LP-23",
+      "expected_product_ids": [
+        "LP-23"
+      ],
+      "source_chunk_id": "LP-23",
+      "review_status": "approved",
+      "query": "预算5000内，想要14英寸触控翻转的云章轻薄本，有什么推荐？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 5000
+    },
+    {
+      "case_id": "PC-034",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "LP-24",
+      "expected_product_ids": [
+        "LP-12",
+        "LP-24",
+        "LP-28"
+      ],
+      "source_chunk_id": "LP-24",
+      "review_status": "approved",
+      "query": "预算7000到8000元，想买一台15英寸以上的大屏笔记本。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 8000
+    },
+    {
+      "case_id": "PC-035",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "LP-25",
+      "expected_product_ids": [
+        "LP-01",
+        "LP-15",
+        "LP-25",
+        "LP-27"
+      ],
+      "source_chunk_id": "LP-25",
+      "review_status": "approved",
+      "query": "想买星海品牌的14寸轻薄本，续航长，适合学生办公和出差，预算5000元左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-01']",
+      "max_price": 5500
+    },
+    {
+      "case_id": "PC-036",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "LP-26",
+      "expected_product_ids": [
+        "LP-13",
+        "LP-26",
+        "LP-34"
+      ],
+      "source_chunk_id": "LP-26",
+      "review_status": "approved",
+      "query": "想买个16寸的笔记本，预算一万到一万一，有啥推荐？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 11000
+    },
+    {
+      "case_id": "PC-037",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "LP-27",
+      "expected_product_ids": [
+        "LP-09",
+        "LP-11",
+        "LP-27",
+        "LP-32"
+      ],
+      "source_chunk_id": "LP-27",
+      "review_status": "approved",
+      "query": "预算4500元左右，想买14英寸轻薄本，重量轻、续航长，通勤携带方便",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-09'] | 标注补全 +['LP-32']",
+      "max_price": 4950
+    },
+    {
+      "case_id": "PC-039",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "LP-29",
+      "expected_product_ids": [
+        "LP-07",
+        "LP-14",
+        "LP-29"
+      ],
+      "source_chunk_id": "LP-29",
+      "review_status": "approved",
+      "query": "想找一台14英寸、售价在5500到6000元之间的笔记本",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 6000
+    },
+    {
+      "case_id": "PC-040",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "LP-30",
+      "expected_product_ids": [
+        "LP-30"
+      ],
+      "source_chunk_id": "LP-30",
+      "review_status": "approved",
+      "query": "找15.6英寸2.5K 240Hz屏、32G内存、1T固态、16G独显游戏本，预算约一万。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 11000
+    },
+    {
+      "case_id": "PC-041",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "LP-31",
+      "expected_product_ids": [
+        "LP-01",
+        "LP-07",
+        "LP-31"
+      ],
+      "source_chunk_id": "LP-31",
+      "review_status": "approved",
+      "query": "想买个14寸轻薄本，2.8K高刷屏，16G+1T，续航长，五千多块，有啥推荐？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-07']",
+      "max_price": 5999
+    },
+    {
+      "case_id": "PC-042",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "LP-32",
+      "expected_product_ids": [
+        "LP-11",
+        "LP-23",
+        "LP-32"
+      ],
+      "source_chunk_id": "LP-32",
+      "review_status": "approved",
+      "query": "想买云章品牌的14英寸轻薄本，预算5000内，通勤办公，续航要长。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-23']",
+      "max_price": 5000
+    },
+    {
+      "case_id": "PC-043",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "LP-33",
+      "expected_product_ids": [
+        "LP-12",
+        "LP-33"
+      ],
+      "source_chunk_id": "LP-33",
+      "review_status": "approved",
+      "query": "想买台 15.6 英寸 2.5K 165Hz 电竞屏、32GB 内存、独显 8GB 的游戏本，预算 8000 多，有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-12']",
+      "max_price": 8999
+    },
+    {
+      "case_id": "PC-044",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "LP-34",
+      "expected_product_ids": [
+        "LP-10",
+        "LP-13",
+        "LP-26",
+        "LP-34"
+      ],
+      "source_chunk_id": "LP-34",
+      "review_status": "approved",
+      "query": "16英寸大屏、售价一万元以上的笔记本",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['LP-10']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-045",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "PH-06",
+      "expected_product_ids": [
+        "PH-06"
+      ],
+      "source_chunk_id": "PH-06",
+      "review_status": "approved",
+      "query": "经常户外露营，想买一部六千毫安大电池、抗摔、信号好、强光下屏幕清晰的手机。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-046",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "PH-07",
+      "expected_product_ids": [
+        "PH-07"
+      ],
+      "source_chunk_id": "PH-07",
+      "review_status": "approved",
+      "query": "有没有七寸大屏、护眼还能用手写笔的手机？续航得撑一天，预算两千八。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 2800
+    },
+    {
+      "case_id": "PC-047",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "PH-08",
+      "expected_product_ids": [
+        "PH-08"
+      ],
+      "source_chunk_id": "PH-08",
+      "review_status": "approved",
+      "query": "经常拍远景和玩游戏，想买五千多、2K高刷曲屏、带长焦镜头的手机",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 5999
+    },
+    {
+      "case_id": "PC-048",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "PH-09",
+      "expected_product_ids": [
+        "PH-09",
+        "PH-28"
+      ],
+      "source_chunk_id": "PH-09",
+      "review_status": "approved",
+      "query": "想买墨白品牌三千三左右的手机，哪款性价比高？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 3630
+    },
+    {
+      "case_id": "PC-049",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "PH-10",
+      "expected_product_ids": [
+        "PH-02",
+        "PH-10"
+      ],
+      "source_chunk_id": "PH-10",
+      "review_status": "approved",
+      "query": "想买售价在 4800 到 5200 元之间的手机",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 5200
+    },
+    {
+      "case_id": "PC-050",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "PH-11",
+      "expected_product_ids": [
+        "PH-11",
+        "PH-15",
+        "PH-32"
+      ],
+      "source_chunk_id": "PH-11",
+      "review_status": "approved",
+      "query": "通勤用手机，想要轻薄直屏，单手拿着舒服，电池耐用充电快，价格两千多。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-15', 'PH-32']",
+      "max_price": 2999
+    },
+    {
+      "case_id": "PC-051",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "PH-12",
+      "expected_product_ids": [
+        "PH-12"
+      ],
+      "source_chunk_id": "PH-12",
+      "review_status": "approved",
+      "query": "打游戏不卡，屏幕高刷，电池大充电快，三千五左右的手机有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 3850
+    },
+    {
+      "case_id": "PC-052",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "PH-13",
+      "expected_product_ids": [
+        "PH-13",
+        "PH-33"
+      ],
+      "source_chunk_id": "PH-13",
+      "review_status": "approved",
+      "query": "想买云章竹简系列的大屏手机，能分屏办公和看视频，商务出行用。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-053",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "PH-14",
+      "expected_product_ids": [
+        "PH-14",
+        "PH-18",
+        "PH-26"
+      ],
+      "source_chunk_id": "PH-14",
+      "review_status": "approved",
+      "query": "想买苍岭手机，预算4000到4600元，哪款更值得选？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 4600
+    },
+    {
+      "case_id": "PC-054",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "PH-15",
+      "expected_product_ids": [
+        "PH-15"
+      ],
+      "source_chunk_id": "PH-15",
+      "review_status": "approved",
+      "query": "想找一款 6.36 英寸 1.5K 120Hz 直屏、12GB+512GB 存储的轻薄手机",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-055",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "PH-16",
+      "expected_product_ids": [
+        "PH-12",
+        "PH-16"
+      ],
+      "source_chunk_id": "PH-16",
+      "review_status": "approved",
+      "query": "爱玩高帧手游，想要144Hz电竞屏、6000mAh电池和120W快充，预算四千左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-12']",
+      "max_price": 4400
+    },
+    {
+      "case_id": "PC-056",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "PH-17",
+      "expected_product_ids": [
+        "PH-13",
+        "PH-17",
+        "PH-21",
+        "PH-25"
+      ],
+      "source_chunk_id": "PH-17",
+      "review_status": "approved",
+      "query": "想找个2K高刷屏、带潜望长焦、16G内存1T存储的旗舰机，八千左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-13'] | 标注补全 +['PH-21', 'PH-25']",
+      "max_price": 8800
+    },
+    {
+      "case_id": "PC-057",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "PH-18",
+      "expected_product_ids": [
+        "PH-14",
+        "PH-18",
+        "PH-26",
+        "PH-30"
+      ],
+      "source_chunk_id": "PH-18",
+      "review_status": "approved",
+      "query": "想买一台4500元左右，全焦段影像、长续航、适合旅拍的手机。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-30']",
+      "max_price": 4950
+    },
+    {
+      "case_id": "PC-058",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "PH-19",
+      "expected_product_ids": [
+        "PH-11",
+        "PH-19",
+        "PH-32"
+      ],
+      "source_chunk_id": "PH-19",
+      "review_status": "approved",
+      "query": "想找2699元左右、256GB存储的轻薄直屏手机，快充和续航好，求推荐。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-11'] | 标注补全 +['PH-32']",
+      "max_price": 2970
+    },
+    {
+      "case_id": "PC-059",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "PH-20",
+      "expected_product_ids": [
+        "PH-20"
+      ],
+      "source_chunk_id": "PH-20",
+      "review_status": "approved",
+      "query": "需要 144Hz 高刷直屏、12GB 运存和 512GB 存储的手机。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-060",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "PH-21",
+      "expected_product_ids": [
+        "PH-13",
+        "PH-17",
+        "PH-21",
+        "PH-25"
+      ],
+      "source_chunk_id": "PH-21",
+      "review_status": "approved",
+      "query": "想找一台适合专业摄影和重度娱乐的旗舰手机，长焦高像素，快充快，预算七千多。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-13'] | 标注补全 +['PH-17', 'PH-25']",
+      "max_price": 7999
+    },
+    {
+      "case_id": "PC-061",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "PH-22",
+      "expected_product_ids": [
+        "PH-13",
+        "PH-22",
+        "PH-27"
+      ],
+      "source_chunk_id": "PH-22",
+      "review_status": "approved",
+      "query": "想买个能折叠的大屏手机，预算八千左右，有啥推荐？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-13'] | 标注补全 +['PH-27']",
+      "max_price": 8800
+    },
+    {
+      "case_id": "PC-062",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "PH-23",
+      "expected_product_ids": [
+        "PH-23"
+      ],
+      "source_chunk_id": "PH-23",
+      "review_status": "approved",
+      "query": "想要 6.8 英寸 144Hz 直屏、5500mAh 电池的 16GB 游戏手机，预算 4600 左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 5060
+    },
+    {
+      "case_id": "PC-063",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "PH-24",
+      "expected_product_ids": [
+        "PH-24"
+      ],
+      "source_chunk_id": "PH-24",
+      "review_status": "approved",
+      "query": "想找一款电池6000mAh、屏幕护眼、价格2700左右的手机，有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 2970
+    },
+    {
+      "case_id": "PC-064",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "PH-25",
+      "expected_product_ids": [
+        "PH-17",
+        "PH-21",
+        "PH-25"
+      ],
+      "source_chunk_id": "PH-25",
+      "review_status": "approved",
+      "query": "预算7000元以上，想要极光品牌的手机。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-065",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "PH-26",
+      "expected_product_ids": [
+        "PH-26"
+      ],
+      "source_chunk_id": "PH-26",
+      "review_status": "approved",
+      "query": "长途户外用，需要大电池、防尘抗水、信号定位好、护眼屏的手机。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-066",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "PH-27",
+      "expected_product_ids": [
+        "PH-13",
+        "PH-17",
+        "PH-22",
+        "PH-27"
+      ],
+      "source_chunk_id": "PH-27",
+      "review_status": "approved",
+      "query": "想买个屏幕大点、能分屏办公的手机，预算八千左右，有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-17']",
+      "max_price": 8800
+    },
+    {
+      "case_id": "PC-067",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "PH-28",
+      "expected_product_ids": [
+        "PH-09",
+        "PH-28"
+      ],
+      "source_chunk_id": "PH-28",
+      "review_status": "approved",
+      "query": "想买3000-3500元、轻便舒适、适合日常通勤影音的手机，要有高刷和快充。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 3500
+    },
+    {
+      "case_id": "PC-068",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "PH-29",
+      "expected_product_ids": [
+        "PH-29"
+      ],
+      "source_chunk_id": "PH-29",
+      "review_status": "approved",
+      "query": "想买2699元、星海潮汐系列、120Hz直屏的手机，有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 2699
+    },
+    {
+      "case_id": "PC-069",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "PH-30",
+      "expected_product_ids": [
+        "PH-14",
+        "PH-30"
+      ],
+      "source_chunk_id": "PH-30",
+      "review_status": "approved",
+      "query": "预算 4200 到 4400 元，想买一部均衡体验的手机",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 4400
+    },
+    {
+      "case_id": "PC-070",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "PH-31",
+      "expected_product_ids": [
+        "PH-31"
+      ],
+      "source_chunk_id": "PH-31",
+      "review_status": "approved",
+      "query": "常拍远景，想买台六千元内带潜望长焦和无线充电的苍岭手机",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 6000
+    },
+    {
+      "case_id": "PC-071",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "PH-32",
+      "expected_product_ids": [
+        "PH-19",
+        "PH-32"
+      ],
+      "source_chunk_id": "PH-32",
+      "review_status": "approved",
+      "query": "想买个两千六七的轻巧手机，最好是Air那种，日常用。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 2700
+    },
+    {
+      "case_id": "PC-072",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "PH-33",
+      "expected_product_ids": [
+        "PH-03",
+        "PH-07",
+        "PH-33"
+      ],
+      "source_chunk_id": "PH-33",
+      "review_status": "approved",
+      "query": "预算 3500 元左右，想买一台云章的大屏长续航手机，主要用来看剧和阅读。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['PH-03'] | 标注补全 +['PH-07']",
+      "max_price": 3850
+    },
+    {
+      "case_id": "PC-073",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "HP-06",
+      "expected_product_ids": [
+        "HP-06",
+        "HP-18",
+        "HP-26"
+      ],
+      "source_chunk_id": "HP-06",
+      "review_status": "approved",
+      "query": "想买500元内的耳夹式开放蓝牙耳机，要求续航长、有低延迟和防水，哪款合适？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-26', 'HP-18']",
+      "max_price": 500
+    },
+    {
+      "case_id": "PC-074",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "HP-07",
+      "expected_product_ids": [
+        "HP-07"
+      ],
+      "source_chunk_id": "HP-07",
+      "review_status": "approved",
+      "query": "单耳4.1克、42dB自适应降噪且支持无线充电的入耳式耳机",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-075",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "HP-08",
+      "expected_product_ids": [
+        "HP-08",
+        "HP-16",
+        "HP-20",
+        "HP-28",
+        "HP-33"
+      ],
+      "source_chunk_id": "HP-08",
+      "review_status": "approved",
+      "query": "常出差坐飞机，想要头戴式降噪耳机，降噪强，续航久，能插线连电脑。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-28', 'HP-20'] | 标注补全 +['HP-33', 'HP-16']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-076",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "HP-09",
+      "expected_product_ids": [
+        "HP-09"
+      ],
+      "source_chunk_id": "HP-09",
+      "review_status": "approved",
+      "query": "想找降噪能到52dB、总续航42小时、还能无线充电的入耳式耳机，预算两千多。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 2999
+    },
+    {
+      "case_id": "PC-077",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "HP-10",
+      "expected_product_ids": [
+        "HP-10"
+      ],
+      "source_chunk_id": "HP-10",
+      "review_status": "approved",
+      "query": "跑步健身用，要耳挂式稳固、IP68防水防尘、主动降噪的真无线耳机",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-078",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "HP-11",
+      "expected_product_ids": [
+        "HP-11",
+        "HP-24"
+      ],
+      "source_chunk_id": "HP-11",
+      "review_status": "approved",
+      "query": "想选星海潮汐系列1500元内带主动降噪的入耳真无线，Mini Pro和潮汐ANC哪款更轻？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 1500
+    },
+    {
+      "case_id": "PC-079",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "HP-12",
+      "expected_product_ids": [
+        "HP-12",
+        "HP-31"
+      ],
+      "source_chunk_id": "HP-12",
+      "review_status": "approved",
+      "query": "想买一款售价599元的真无线蓝牙耳机。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 599
+    },
+    {
+      "case_id": "PC-080",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "HP-13",
+      "expected_product_ids": [
+        "HP-13"
+      ],
+      "source_chunk_id": "HP-13",
+      "review_status": "approved",
+      "query": "想买头戴式降噪耳机，能2.4G无线连电脑也能有线用，续航长。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-081",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "HP-14",
+      "expected_product_ids": [
+        "HP-10",
+        "HP-14"
+      ],
+      "source_chunk_id": "HP-14",
+      "review_status": "approved",
+      "query": "想找款通勤运动用的真无线降噪耳机，续航长能双设备连接，防水，预算九百左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-10']",
+      "max_price": 990
+    },
+    {
+      "case_id": "PC-082",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "HP-15",
+      "expected_product_ids": [
+        "HP-15"
+      ],
+      "source_chunk_id": "HP-15",
+      "review_status": "approved",
+      "query": "500元内半入耳蓝牙耳机，无主动降噪，有通话降噪和低延迟，适合会议网课。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 500
+    },
+    {
+      "case_id": "PC-083",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "HP-16",
+      "expected_product_ids": [
+        "HP-16",
+        "HP-28"
+      ],
+      "source_chunk_id": "HP-16",
+      "review_status": "approved",
+      "query": "想买墨白1299元左右的ANC耳机，竹影ANC和砚台ANC哪个更值得选？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 1430
+    },
+    {
+      "case_id": "PC-084",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "HP-17",
+      "expected_product_ids": [
+        "HP-17",
+        "HP-22",
+        "HP-29",
+        "HP-30"
+      ],
+      "source_chunk_id": "HP-17",
+      "review_status": "approved",
+      "query": "开放式耳机，运动时能感知环境，适合跑步骑行。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-30']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-085",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "HP-18",
+      "expected_product_ids": [
+        "HP-06",
+        "HP-18",
+        "HP-26"
+      ],
+      "source_chunk_id": "HP-18",
+      "review_status": "approved",
+      "query": "想买耳夹式开放耳机，通勤办公长时间佩戴，预算五百内。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 500
+    },
+    {
+      "case_id": "PC-086",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "HP-19",
+      "expected_product_ids": [
+        "HP-01",
+        "HP-05",
+        "HP-07",
+        "HP-16",
+        "HP-19",
+        "HP-27",
+        "HP-28"
+      ],
+      "source_chunk_id": "HP-19",
+      "review_status": "approved",
+      "query": "预算一千三，想买个主动降噪的耳机，有合适的吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-01', 'HP-27'] | 标注补全 +['HP-07', 'HP-05']",
+      "max_price": 1300
+    },
+    {
+      "case_id": "PC-087",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "HP-20",
+      "expected_product_ids": [
+        "HP-20",
+        "HP-25",
+        "HP-28",
+        "HP-33"
+      ],
+      "source_chunk_id": "HP-20",
+      "review_status": "approved",
+      "query": "想买头戴式蓝牙降噪耳机，续航长且支持有线，适合长途差旅和桌面监听。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-28'] | 标注补全 +['HP-33', 'HP-25']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-088",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "HP-21",
+      "expected_product_ids": [
+        "HP-21"
+      ],
+      "source_chunk_id": "HP-21",
+      "review_status": "approved",
+      "query": "想选一款 699 元的颈挂式运动蓝牙耳机，要有主动降噪和 IPX6 防水，续航 12 小时，哪款合适？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 699
+    },
+    {
+      "case_id": "PC-090",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "HP-23",
+      "expected_product_ids": [
+        "HP-23"
+      ],
+      "source_chunk_id": "HP-23",
+      "review_status": "approved",
+      "query": "预算400元内，通勤网课用的轻量入耳主动降噪耳机，支持低延迟手游。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 400
+    },
+    {
+      "case_id": "PC-091",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "HP-24",
+      "expected_product_ids": [
+        "HP-19",
+        "HP-24"
+      ],
+      "source_chunk_id": "HP-24",
+      "review_status": "approved",
+      "query": "想买一千五左右的入耳式真无线，要自适应降噪，续航长，支持 LDAC 和无线充电。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-19']",
+      "max_price": 1650
+    },
+    {
+      "case_id": "PC-092",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "HP-25",
+      "expected_product_ids": [
+        "HP-08",
+        "HP-16",
+        "HP-25",
+        "HP-28",
+        "HP-33"
+      ],
+      "source_chunk_id": "HP-25",
+      "review_status": "approved",
+      "query": "需要一款头戴式主动降噪耳机，降噪效果好，续航长，可折叠收纳，适合长时间佩戴。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-28'] | 标注补全 +['HP-16', 'HP-08', 'HP-33']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-093",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "HP-26",
+      "expected_product_ids": [
+        "HP-26"
+      ],
+      "source_chunk_id": "HP-26",
+      "review_status": "approved",
+      "query": "找开放式耳夹，蓝牙5.4，续航28小时，400元内，低延迟，有推荐吗？",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 400
+    },
+    {
+      "case_id": "PC-094",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "HP-27",
+      "expected_product_ids": [
+        "HP-15",
+        "HP-23",
+        "HP-27"
+      ],
+      "source_chunk_id": "HP-27",
+      "review_status": "approved",
+      "query": "云章Mini系列真无线耳机，售价700元以内",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": 700
+    },
+    {
+      "case_id": "PC-095",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "HP-28",
+      "expected_product_ids": [
+        "HP-08",
+        "HP-16",
+        "HP-28",
+        "HP-33"
+      ],
+      "source_chunk_id": "HP-28",
+      "review_status": "approved",
+      "query": "想买头戴式主动降噪耳机，续航长，可折叠，有3.5mm接口，适合长途飞行和办公。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-33', 'HP-08', 'HP-16']",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-096",
+      "type": "product",
+      "style": "口语随口问",
+      "expected_product_id": "HP-29",
+      "expected_product_ids": [
+        "HP-17",
+        "HP-29",
+        "HP-30"
+      ],
+      "source_chunk_id": "HP-29",
+      "review_status": "approved",
+      "query": "我想买个开放式挂耳的运动耳机，不要主动降噪，防水好，续航长，能连两个设备，大概九百块。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-30'] | 标注补全 +['HP-17']",
+      "max_price": 990
+    },
+    {
+      "case_id": "PC-097",
+      "type": "product",
+      "style": "具体需求",
+      "expected_product_id": "HP-30",
+      "expected_product_ids": [
+        "HP-30"
+      ],
+      "source_chunk_id": "HP-30",
+      "review_status": "approved",
+      "query": "夜跑想找开放式耳挂耳机，要稳固防水带反光条，不堵耳道能感知环境，续航长",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用",
+      "max_price": null
+    },
+    {
+      "case_id": "PC-098",
+      "type": "product",
+      "style": "对比/咨询",
+      "expected_product_id": "HP-31",
+      "expected_product_ids": [
+        "HP-12",
+        "HP-15",
+        "HP-31"
+      ],
+      "source_chunk_id": "HP-31",
+      "review_status": "approved",
+      "query": "想买600元左右的半入耳真无线，要轻巧小充电仓、低延迟和通话降噪，求推荐",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-15', 'HP-12']",
+      "max_price": 660
+    },
+    {
+      "case_id": "PC-099",
+      "type": "product",
+      "style": "参数关注",
+      "expected_product_id": "HP-32",
+      "expected_product_ids": [
+        "HP-11",
+        "HP-24",
+        "HP-32"
+      ],
+      "source_chunk_id": "HP-32",
+      "review_status": "approved",
+      "query": "想找一款售价 1499 元、带主动降噪的入耳式真无线耳机。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-11']",
+      "max_price": 1499
+    },
+    {
+      "case_id": "PC-100",
+      "type": "product",
+      "style": "场景描述",
+      "expected_product_id": "HP-33",
+      "expected_product_ids": [
+        "HP-08",
+        "HP-16",
+        "HP-20",
+        "HP-28",
+        "HP-33"
+      ],
+      "source_chunk_id": "HP-33",
+      "review_status": "approved",
+      "query": "经常出差坐飞机，想买头戴式降噪耳机，要续航久、能插线，预算两千左右。",
+      "review_note": "抽检豁免（用户裁定 2026-09-14），防幻觉流程产出直接采用 | 标注补全 +['HP-28'] | 标注补全 +['HP-08', 'HP-16', 'HP-20']",
+      "max_price": 2200
+    }
+  ]
+}

@@ -1,0 +1,918 @@
+{
+  "cases": [
+    {
+      "id": "R001",
+      "group": "single_presale",
+      "difficulty": "easy",
+      "description": "明确求推荐",
+      "input": "有什么适合写代码的笔记本推荐吗",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R002",
+      "group": "single_presale",
+      "difficulty": "easy",
+      "description": "求推荐+预算",
+      "input": "预算6000左右买什么手机",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R003",
+      "group": "single_presale",
+      "difficulty": "easy",
+      "description": "两款对比（原比选，2026-09-04 融入售前）",
+      "input": "星海凌霄 Pro 14 和曜石磐石 15 哪个好",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R004",
+      "group": "single_presale",
+      "difficulty": "easy",
+      "description": "怎么选（原比选，2026-09-04 融入售前）",
+      "input": "云章轻羽 Air 和墨白素笺 Earbuds 怎么选",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R005",
+      "group": "single_consult",
+      "difficulty": "easy",
+      "description": "知识问题",
+      "input": "OLED 和 IPS 屏有什么区别",
+      "expected": [
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R006",
+      "group": "single_consult",
+      "difficulty": "easy",
+      "description": "通用政策知识（无具体商品，规则 4 第一段）",
+      "input": "耳机一般保修几年",
+      "expected": [
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R007",
+      "group": "multi",
+      "difficulty": "easy",
+      "description": "推荐+知识双诉求",
+      "input": "推荐个笔记本，顺便讲讲 OLED 和 IPS 的区别",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R008",
+      "group": "single_presale",
+      "difficulty": "easy",
+      "description": "推荐+对比合并（2026-09-04：均为售前职责，单一场景）",
+      "input": "帮我挑个耳机，顺便对比下凌霄 Buds Pro 和素笺 Earbuds",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R009",
+      "group": "single_presale",
+      "difficulty": "medium",
+      "description": "隐含购买意图（无买字）",
+      "input": "我想买个轻薄本",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R010",
+      "group": "single_presale",
+      "difficulty": "medium",
+      "description": "收藏挑选（隐含）",
+      "input": "从我的收藏里挑一款",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R011",
+      "group": "single_consult",
+      "difficulty": "medium",
+      "description": "闲聊兜底",
+      "input": "你好",
+      "expected": [
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R012",
+      "group": "single_consult",
+      "difficulty": "medium",
+      "description": "单款快查（无历史兜底）",
+      "input": "这款多少钱",
+      "expected": [
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R013",
+      "group": "single_presale",
+      "difficulty": "hard",
+      "description": "首轮完整问法但无购买动词（疑问句式，非『推荐/买』开头）",
+      "input": "有没有适合写代码、续航好一点的笔记本？",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R014",
+      "group": "single_presale",
+      "difficulty": "hard",
+      "description": "可行性咨询归售前（2026-09-01 裁定：含预算+品类隐含选购诉求）",
+      "input": "500 元预算能买到降噪耳机吗",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R015",
+      "group": "multi",
+      "difficulty": "hard",
+      "description": "多意图隐含",
+      "input": "选个手机，讲讲 OLED 屏伤不伤眼",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R016",
+      "group": "continue",
+      "difficulty": "easy",
+      "description": "补预算（澄清延续）",
+      "input": "500",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R017",
+      "group": "continue",
+      "difficulty": "easy",
+      "description": "补用途",
+      "input": "日常办公",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R018",
+      "group": "continue",
+      "difficulty": "easy",
+      "description": "补用途",
+      "input": "打游戏",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R019",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "真实漂移场景复现（两轮+建议混合消息）",
+      "input": "600",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买副耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "选耳机这事咱们来理一理～先问两个最关键的：1. 预算大概多少？2. 主要在哪用？比如通勤/地铁（优先降噪）、办公室/自习（优先佩戴舒适）、运动跑步（优先防水）、打游戏/影音（优先音质、延迟）？"
+        },
+        {
+          "role": "user",
+          "content": "500"
+        },
+        {
+          "role": "assistant",
+          "content": "我查了一下目录，500 元以内的耳机暂时没有匹配的商品。给你两个下一步选择：1. 预算稍微放宽一点——比如告诉我 600 或 800 以内，我帮你看看有没有合适的；2. 如果预算能到千元档，候选会丰富很多。另外想确认一下：你平时主要在什么场景用耳机？"
+        }
+      ]
+    },
+    {
+      "id": "R020",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "补尺寸偏好",
+      "input": "14寸的",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认几个关键信息：预算多少？主要用途？对尺寸或重量有要求吗？"
+        }
+      ]
+    },
+    {
+      "id": "R021",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "复合补充信息",
+      "input": "预算500，主要通勤",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R022",
+      "group": "continue",
+      "difficulty": "hard",
+      "description": "模糊回应延续",
+      "input": "随便，你看着办",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R023",
+      "group": "continue",
+      "difficulty": "hard",
+      "description": "澄清中插入知识问题（双诉求）",
+      "input": "那 OLED 屏伤眼吗",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么（办公/编程/游戏）？"
+        }
+      ]
+    },
+    {
+      "id": "R024",
+      "group": "switch",
+      "difficulty": "easy",
+      "description": "推荐后问保修条款（2026-09-05：条款查证工具在咨询侧，规则 6 条款类→consult）",
+      "input": "这款保修几年",
+      "expected": [
+        "consult"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "推荐个 6000 左右的办公笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "推荐星海凌霄 Pro 14（¥5180）：1.32kg、OLED 屏、续航 11 小时，办公很适合。"
+        }
+      ]
+    },
+    {
+      "id": "R025",
+      "group": "switch",
+      "difficulty": "easy",
+      "description": "推荐后问单款参数（2026-09-04 裁定：推荐语境下的单款追问是售前决策延续；无语境快查才归 consult，见 R012）",
+      "input": "那续航呢",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "推荐个 6000 左右的办公笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "推荐星海凌霄 Pro 14（¥5180）：1.32kg、OLED 屏、续航 11 小时，办公很适合。"
+        }
+      ]
+    },
+    {
+      "id": "R026",
+      "group": "switch",
+      "difficulty": "medium",
+      "description": "推荐后切对比（售前延续）",
+      "input": "那凌霄 Pro 14 和磐石 15 哪个好",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "推荐个 6000 左右的办公笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "推荐星海凌霄 Pro 14（¥5180）：1.32kg、OLED 屏、续航 11 小时，办公很适合。"
+        }
+      ]
+    },
+    {
+      "id": "R027",
+      "group": "switch",
+      "difficulty": "medium",
+      "description": "继续推荐流程（追问更便宜的）",
+      "input": "还有更便宜的吗",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "推荐个 6000 左右的办公笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "推荐星海凌霄 Pro 14（¥5180）：1.32kg、OLED 屏、续航 11 小时，办公很适合。"
+        }
+      ]
+    },
+    {
+      "id": "R028",
+      "group": "switch",
+      "difficulty": "hard",
+      "description": "推荐后切知识问题",
+      "input": "OLED 和 IPS 屏有什么区别",
+      "expected": [
+        "consult"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "推荐个 6000 左右的办公笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "推荐星海凌霄 Pro 14（¥5180）：1.32kg、OLED 屏、续航 11 小时，办公很适合。"
+        }
+      ]
+    },
+    {
+      "id": "R029",
+      "group": "switch",
+      "difficulty": "hard",
+      "description": "咨询后切推荐",
+      "input": "推荐一款护眼的笔记本吧",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "OLED 屏伤眼吗"
+        },
+        {
+          "role": "assistant",
+          "content": "OLED 采用 PWM 调光，低频（约 240Hz）下敏感人群可能眼疲劳，建议选高频 PWM 或 DC 调光机型。"
+        }
+      ]
+    },
+    {
+      "id": "R030",
+      "group": "boundary",
+      "difficulty": "easy",
+      "description": "致谢兜底",
+      "input": "谢谢",
+      "expected": [
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R031",
+      "group": "boundary",
+      "difficulty": "medium",
+      "description": "无历史短消息（无法分类兜底）",
+      "input": "贵吗",
+      "expected": [
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R032",
+      "group": "boundary",
+      "difficulty": "medium",
+      "description": "无历史纯数字（无法分类兜底）",
+      "input": "500",
+      "expected": [
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R033",
+      "group": "boundary",
+      "difficulty": "hard",
+      "description": "无历史指代不明（隐含对比意图，售前）",
+      "input": "这两款差在哪",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R034",
+      "group": "boundary",
+      "difficulty": "hard",
+      "description": "空输入/无意义输入（兜底）",
+      "input": "，，，",
+      "expected": [
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R035",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "多轮澄清递进：补用途（第2轮）",
+      "input": "运动",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        },
+        {
+          "role": "user",
+          "content": "500"
+        },
+        {
+          "role": "assistant",
+          "content": "好，预算 500 收到。那主要用来做什么？通勤、运动、打游戏还是办公？"
+        }
+      ]
+    },
+    {
+      "id": "R036",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "多轮澄清递进：补重量偏好（第2轮）",
+      "input": "轻一点的",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认几个关键信息：预算多少？主要用途？对尺寸或重量有要求吗？"
+        },
+        {
+          "role": "user",
+          "content": "6000 左右，办公用"
+        },
+        {
+          "role": "assistant",
+          "content": "预算和用途清楚了。那对重量或尺寸有偏好吗？"
+        }
+      ]
+    },
+    {
+      "id": "R037",
+      "group": "continue",
+      "difficulty": "easy",
+      "description": "补品牌偏好（澄清延续）",
+      "input": "不要苹果生态的",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想换个手机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认几个信息：预算多少？对品牌或生态有偏好吗？"
+        }
+      ]
+    },
+    {
+      "id": "R038",
+      "group": "continue",
+      "difficulty": "easy",
+      "description": "补连接方式偏好",
+      "input": "有线耳机",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R039",
+      "group": "continue",
+      "difficulty": "easy",
+      "description": "手机品类澄清延续",
+      "input": "4000 左右",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想换个手机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么（拍照/游戏/日常）？"
+        }
+      ]
+    },
+    {
+      "id": "R040",
+      "group": "continue",
+      "difficulty": "easy",
+      "description": "笔记本品类澄清延续",
+      "input": "写代码为主",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R041",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "售前对比澄清延续：补偏好维度",
+      "input": "续航更重要",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "星海凌霄 Pro 14 和曜石磐石 15 哪个好"
+        },
+        {
+          "role": "assistant",
+          "content": "这两款各有侧重：凌霄偏轻薄续航，磐石偏性能。你更看重哪个维度？"
+        }
+      ]
+    },
+    {
+      "id": "R042",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "售前对比澄清延续：补选择倾向",
+      "input": "便宜的那款",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "云章轻羽 Air 和墨白素笺 Earbuds 怎么选"
+        },
+        {
+          "role": "assistant",
+          "content": "轻羽 Air 更轻但没降噪，素笺 Earbuds 有降噪和防水。你更看重价格还是功能？"
+        }
+      ]
+    },
+    {
+      "id": "R043",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "澄清后一次性补全完整需求",
+      "input": "预算5000，主要办公，最好轻一点",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R044",
+      "group": "continue",
+      "difficulty": "hard",
+      "description": "三轮澄清递进（预算→用途→偏好）",
+      "input": "轻一点的",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认几个信息：预算多少？主要用途？"
+        },
+        {
+          "role": "user",
+          "content": "6000"
+        },
+        {
+          "role": "assistant",
+          "content": "预算 6000 收到。主要用来做什么？"
+        },
+        {
+          "role": "user",
+          "content": "办公，偶尔打打游戏"
+        },
+        {
+          "role": "assistant",
+          "content": "好。那对重量、尺寸有要求吗？"
+        }
+      ]
+    },
+    {
+      "id": "R045",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "澄清中换品类（仍属选购）",
+      "input": "算了，我还是看看手机吧",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R046",
+      "group": "continue",
+      "difficulty": "medium",
+      "description": "澄清中终止购买（非选购，兜底）",
+      "input": "算了，先不买了",
+      "expected": [
+        "consult"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个耳机"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R047",
+      "group": "continue",
+      "difficulty": "hard",
+      "description": "澄清中模糊反问（延续）",
+      "input": "你看着推荐吧",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        },
+        {
+          "role": "user",
+          "content": "6000"
+        },
+        {
+          "role": "assistant",
+          "content": "主要用途呢？"
+        }
+      ]
+    },
+    {
+      "id": "R048",
+      "group": "continue",
+      "difficulty": "hard",
+      "description": "澄清中锁定候选跳澄清（售前对比延续）",
+      "input": "那凌霄 Pro 14 和磐石 15 哪个好",
+      "expected": [
+        "presale"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "我想买个笔记本"
+        },
+        {
+          "role": "assistant",
+          "content": "先确认两个关键信息：1. 预算大概多少？2. 主要用来做什么？"
+        }
+      ]
+    },
+    {
+      "id": "R049",
+      "group": "multi",
+      "difficulty": "easy",
+      "description": "推荐+通用政策双诉求（「保修多久」无具体商品语境，规则 4 第一段）",
+      "input": "推荐个耳机，顺便问下保修多久",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R050",
+      "group": "multi",
+      "difficulty": "medium",
+      "description": "对比+知识双诉求",
+      "input": "凌霄 Buds Pro 和素笺 Earbuds 哪个好，顺便讲讲降噪原理",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R051",
+      "group": "multi",
+      "difficulty": "medium",
+      "description": "对比含保修维度（2026-09-05：对比归售前，条款查证由咨询并行补位——售前已无 retrieve_warranty，规则 3）",
+      "input": "凌霄 Pro 14 和磐石 15 差在哪，保修有什么不同",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R052",
+      "group": "multi",
+      "difficulty": "hard",
+      "description": "推荐+对比+知识（推荐对比合并为售前，2026-09-04）",
+      "input": "帮我选个耳机，对比下凌霄和素笺，顺便讲讲什么是 LDAC",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R053",
+      "group": "multi",
+      "difficulty": "hard",
+      "description": "收藏+知识双诉求（无显式连接词）",
+      "input": "从我的收藏里挑个游戏耳机，顺便讲讲低延迟的原理",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": []
+    },
+    {
+      "id": "R054",
+      "group": "single_presale",
+      "difficulty": "medium",
+      "description": "推荐+对比混合（无顺便连接词，均为售前，2026-09-04）",
+      "input": "推荐个 6000 内的笔记本，星海凌霄和曜石磐石我该选哪个",
+      "expected": [
+        "presale"
+      ],
+      "history": []
+    },
+    {
+      "id": "R055",
+      "group": "multi",
+      "difficulty": "hard",
+      "description": "对比+知识双诉求（点名商品，无顺便连接词，隐含双诉求）",
+      "input": "凌霄 Pro 14 和磐石 15 哪个更适合编程，OLED 屏会不会伤眼",
+      "expected": [
+        "presale",
+        "consult"
+      ],
+      "history": []
+    }
+  ]
+}

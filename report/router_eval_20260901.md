@@ -1,0 +1,106 @@
+========================================================================
+Router 专业评测报告
+用例集: router_cases.json（34 条）
+模型: deepseek-v4-flash | 时间: 2026-09-01 17:10:16
+========================================================================
+
+## 一、逐条明细
+[PASS] R001 [single_guide/easy] 明确求推荐 
+      输入: '有什么适合写代码的笔记本推荐吗' → 期望 ['guide'] 实际 ['guide']
+[PASS] R002 [single_guide/easy] 求推荐+预算 
+      输入: '预算6000左右买什么手机' → 期望 ['guide'] 实际 ['guide']
+[PASS] R003 [single_compare/easy] 两款对比 
+      输入: '星海凌霄 Pro 14 和曜石磐石 15 哪个好' → 期望 ['compare'] 实际 ['compare']
+[PASS] R004 [single_compare/easy] 怎么选 
+      输入: '云章轻羽 Air 和墨白素笺 Earbuds 怎么选' → 期望 ['compare'] 实际 ['compare']
+[PASS] R005 [single_consult/easy] 知识问题 
+      输入: 'OLED 和 IPS 屏有什么区别' → 期望 ['consult'] 实际 ['consult']
+[PASS] R006 [single_consult/easy] 政策问题 
+      输入: '耳机一般保修几年' → 期望 ['consult'] 实际 ['consult']
+[PASS] R007 [multi/easy] 推荐+知识双诉求 
+      输入: '推荐个笔记本，顺便讲讲 OLED 和 IPS 的区别' → 期望 ['guide', 'consult'] 实际 ['guide', 'consult']
+[PASS] R008 [multi/easy] 推荐+对比双诉求 
+      输入: '帮我挑个耳机，顺便对比下凌霄 Buds Pro 和素笺 Earbuds' → 期望 ['guide', 'compare'] 实际 ['guide', 'compare']
+[PASS] R009 [single_guide/medium] 隐含购买意图（无买字） 
+      输入: '我想买个轻薄本' → 期望 ['guide'] 实际 ['guide']
+[PASS] R010 [single_guide/medium] 收藏挑选（隐含） 
+      输入: '从我的收藏里挑一款' → 期望 ['guide'] 实际 ['guide']
+[PASS] R011 [single_consult/medium] 闲聊兜底 
+      输入: '你好' → 期望 ['consult'] 实际 ['consult']
+[PASS] R012 [single_consult/medium] 单款快查（无历史兜底） 
+      输入: '这款多少钱' → 期望 ['consult'] 实际 ['consult']
+[PASS] R013 [single_guide/hard] 需求描述无购买动词 
+      输入: '写代码用，续航要好' → 期望 ['guide'] 实际 ['guide']
+[FAIL] R014 [single_consult/hard] 可行性咨询 vs 推荐边界 
+      输入: '500 元预算能买到降噪耳机吗' → 期望 ['consult'] 实际 ['guide']
+[PASS] R015 [multi/hard] 多意图隐含 
+      输入: '选个手机，讲讲 OLED 屏伤不伤眼' → 期望 ['guide', 'consult'] 实际 ['guide', 'consult']
+[PASS] R016 [continue/easy] 补预算（澄清延续） （history 2 条）
+      输入: '500' → 期望 ['guide'] 实际 ['guide']
+[PASS] R017 [continue/easy] 补用途 （history 2 条）
+      输入: '日常办公' → 期望 ['guide'] 实际 ['guide']
+[PASS] R018 [continue/easy] 补用途 （history 2 条）
+      输入: '打游戏' → 期望 ['guide'] 实际 ['guide']
+[PASS] R019 [continue/medium] 真实漂移场景复现（两轮+建议混合消息） （history 4 条）
+      输入: '600' → 期望 ['guide'] 实际 ['guide']
+[PASS] R020 [continue/medium] 补尺寸偏好 （history 2 条）
+      输入: '14寸的' → 期望 ['guide'] 实际 ['guide']
+[PASS] R021 [continue/medium] 复合补充信息 （history 2 条）
+      输入: '预算500，主要通勤' → 期望 ['guide'] 实际 ['guide']
+[PASS] R022 [continue/hard] 模糊回应延续 （history 2 条）
+      输入: '随便，你看着办' → 期望 ['guide'] 实际 ['guide']
+[FAIL] R023 [continue/hard] 澄清中插入知识问题（双诉求） （history 2 条）
+      输入: '那 OLED 屏伤眼吗' → 期望 ['guide', 'consult'] 实际 ['consult']
+[PASS] R024 [switch/easy] 推荐后问政策（换场景） （history 2 条）
+      输入: '这款保修几年' → 期望 ['consult'] 实际 ['consult']
+[PASS] R025 [switch/easy] 推荐后问单款参数（规则4归 consult） （history 2 条）
+      输入: '那续航呢' → 期望 ['consult'] 实际 ['consult']
+[PASS] R026 [switch/medium] 推荐后切比选 （history 2 条）
+      输入: '那凌霄 Pro 14 和磐石 15 哪个好' → 期望 ['compare'] 实际 ['compare']
+[PASS] R027 [switch/medium] 继续推荐流程（追问更便宜的） （history 2 条）
+      输入: '还有更便宜的吗' → 期望 ['guide'] 实际 ['guide']
+[PASS] R028 [switch/hard] 推荐后切知识问题 （history 2 条）
+      输入: 'OLED 和 IPS 屏有什么区别' → 期望 ['consult'] 实际 ['consult']
+[PASS] R029 [switch/hard] 咨询后切推荐 （history 2 条）
+      输入: '推荐一款护眼的笔记本吧' → 期望 ['guide'] 实际 ['guide']
+[PASS] R030 [boundary/easy] 致谢兜底 
+      输入: '谢谢' → 期望 ['consult'] 实际 ['consult']
+[PASS] R031 [boundary/medium] 无历史短消息（无法分类兜底） 
+      输入: '贵吗' → 期望 ['consult'] 实际 ['consult']
+[FAIL] R032 [boundary/medium] 无历史纯数字（无法分类兜底） 
+      输入: '500' → 期望 ['consult'] 实际 ['guide']
+[PASS] R033 [boundary/hard] 无历史指代不明（隐含对比意图） 
+      输入: '这两款差在哪' → 期望 ['compare'] 实际 ['compare']
+[PASS] R034 [boundary/hard] 空输入/无意义输入（兜底） 
+      输入: '，，，' → 期望 ['consult'] 实际 ['consult']
+
+## 二、汇总
+完全匹配准确率: 31/34 = 91.2%
+
+## 三、场景级指标（多标签：精确率 / 召回率 / F1）
+  场景         召回(exp→act)      精确(act→exp)      F1    
+  guide      94%              89%              0.92    (18 例)
+  compare    100%             100%             1.00    (5 例)
+  consult    87%              100%             0.93    (15 例)
+
+## 四、分维度（group）
+  boundary         4/5 = 80%
+  continue         7/8 = 88%
+  multi            3/3 = 100%
+  single_compare   2/2 = 100%
+  single_consult   4/5 = 80%
+  single_guide     5/5 = 100%
+  switch           6/6 = 100%
+
+## 五、分难度（difficulty）
+  easy       14/14 = 100%
+  hard       7/9 = 78%
+  medium     10/11 = 91%
+
+## 六、失败分析（3 条）
+  ✗ R014 [single_consult/hard] 可行性咨询 vs 推荐边界
+      期望 ['consult'] → 实际 ['guide']
+  ✗ R023 [continue/hard] 澄清中插入知识问题（双诉求）
+      期望 ['guide', 'consult'] → 实际 ['consult']
+  ✗ R032 [boundary/medium] 无历史纯数字（无法分类兜底）
+      期望 ['consult'] → 实际 ['guide']
