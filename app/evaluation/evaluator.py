@@ -14,6 +14,7 @@ from openai import OpenAI
 from app.config.settings import settings
 from app.evaluation import metrics, judges
 from app.evaluation.dataset import EvalCase
+from app.evaluation.reporter import LangfuseReporter
 from app.evaluation.sandbox import Sandbox
 from app.evaluation.trace import RunTrace
 
@@ -96,13 +97,16 @@ class Evaluator:
     """逐用例评估：沙箱采集 → 规则判分 →（声明了 aspects 的用例）LLM judge。
 
     judge 分 advisory：写入 judge_scores，不参与 passed；解析失败标"未判"。
+    判分完成后（可选）把结果作为 score 上报 Langfuse——判分与本地上报严格解耦：
+    上报失败只记警告，不影响通过率与报告。
     """
 
     def __init__(self, sandbox: Sandbox, client: OpenAI | None = None,
-                 model: str | None = None):
+                 model: str | None = None, reporter: LangfuseReporter | None = None):
         self.sandbox = sandbox
         self.client = client    # judge 用；None = 跳过全部 judge（离线测试）
         self.model = model or ""
+        self.reporter = reporter or LangfuseReporter.disabled()
 
     def run_case(self, case: EvalCase) -> CaseResult:
         trace = self.sandbox.run(case)
@@ -122,6 +126,15 @@ class Evaluator:
                     len(set(case.expected_tools) & succeeded),
                     len(case.expected_tools),
                 )
+        # 上报判分结果（no-op 时零开销）
+        self.reporter.report_case(
+            trace.langfuse_trace_id,
+            passed=result.passed,
+            checks=result.checks,
+            judge_scores=result.judge_scores,
+            tool_hits=result.tool_hits,
+            error=result.error,
+        )
         return result
 
     def _run_judges(self, case: EvalCase, trace: RunTrace) -> dict:
@@ -129,14 +142,22 @@ class Evaluator:
             return {}
         if not settings.eval_use_judge:
             return {}
+        # judge 的 client 也会被 langfuse 的类级补丁接到（wrapt 全局补丁）——
+        # 确认已包装才传 name（否则会漏给真 API）；同时把 judge 挂回用例 trace
+        # （否则每次 judge 各成一个独立根 trace，看板全是噪音）
+        instrumented = (
+            self.reporter.enabled and self.reporter.is_instrumented(self.client)
+        )
         scores = {}
         for aspect in case.judge_aspects:
-            scores[aspect] = judges.judge_aspect(
-                client=self.client,
-                model=self.model,
-                aspect=aspect,
-                turns=self._judge_materials(trace),
-            )
+            with self.reporter.judge_scope(trace.langfuse_trace_id, aspect):
+                scores[aspect] = judges.judge_aspect(
+                    client=self.client,
+                    model=self.model,
+                    aspect=aspect,
+                    turns=self._judge_materials(trace),
+                    call_name=f"judge:{aspect}" if instrumented else "",
+                )
         return scores
 
     @staticmethod

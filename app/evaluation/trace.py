@@ -15,13 +15,14 @@ from dataclasses import dataclass, field
 class LLMCallRecord:
     """单次 LLM 调用的记录。"""
 
-    purpose: str  # 启发式标注：router / react
+    purpose: str  # 启发式标注：router / react / answer
     model: str
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
     tool_calls: list[dict] = field(default_factory=list)  # 本次响应请求的工具 [{name, arguments}]
     latency_ms: float = 0.0
+    finish_reason: str = ""  # 停止原因：stop=正常；length=输出被截断（回复中途断掉的诊断依据）
 
 
 @dataclass
@@ -47,6 +48,7 @@ class RunTrace:
     # 观测序列（第 i 轮调用 = tool_observations[bounds[i-1]:bounds[i]]），
     # 供 process judge 按轮对齐材料（v2 修复"最后一轮问题 vs 全会话调用"错位）
     tool_boundaries: list[int] = field(default_factory=list)
+    langfuse_trace_id: str | None = None  # 上报开启时该用例的 Langfuse trace id（判分后挂 score）
     error: str | None = None  # 运行异常信息，None=正常
 
     # ---------- 便捷聚合属性 ----------
@@ -66,6 +68,11 @@ class RunTrace:
     def tool_call_names(self) -> list[str]:
         """实际调用过的工具名（按调用顺序）。"""
         return [obs.name for obs in self.tool_observations]
+
+    @property
+    def abnormal_llm_calls(self) -> list[LLMCallRecord]:
+        """非正常结束（finish_reason≠stop）的 LLM 调用——回复截断类问题的诊断入口。"""
+        return [c for c in self.llm_calls if c.finish_reason and c.finish_reason != "stop"]
 
     @property
     def all_replies_text(self) -> str:
@@ -90,6 +97,7 @@ class RunTrace:
                     "completion_tokens": c.completion_tokens,
                     "total_tokens": c.total_tokens,
                     "latency_ms": round(c.latency_ms, 1),
+                    "finish_reason": c.finish_reason,
                     "requested_tools": c.tool_calls,
                 }
                 for c in self.llm_calls
@@ -99,5 +107,6 @@ class RunTrace:
                 for obs in self.tool_observations
             ],
             "tool_boundaries": self.tool_boundaries,
+            "langfuse_trace_id": self.langfuse_trace_id,
             "error": self.error,
         }

@@ -20,12 +20,20 @@ v2 变更（修复 v1 的 multi-turn 材料错位 bug）：
 from __future__ import annotations
 
 import json
+import logging
 import re
+from datetime import datetime
+from pathlib import Path
 
 from openai import OpenAI
 
+logger = logging.getLogger(__name__)
+
 JUDGE_PROMPT_VERSION = "v2"
 JUDGE_TEMPERATURE = 0
+
+# 解析失败证据落盘（批次 2.5）："未判"必须可追溯
+_FAIL_LOG_PATH = Path(__file__).resolve().parent / "runs" / "judge_failures.jsonl"
 
 _ASPECT_RUBRICS = {
     "answer_quality": (
@@ -69,6 +77,9 @@ def _parse_judge_response(raw: str) -> dict | None:
     except json.JSONDecodeError:
         return None
     score = data.get("score")
+    # 容忍 4.0 这类整数型浮点（模型偶发输出），非整数浮点仍拒绝
+    if isinstance(score, float) and score.is_integer():
+        score = int(score)
     reasons = data.get("reasons")
     if not isinstance(score, int) or isinstance(score, bool) or not 1 <= score <= 5:
         return None
@@ -77,8 +88,33 @@ def _parse_judge_response(raw: str) -> dict | None:
     return {"score": score, "reasons": [str(r) for r in reasons][:2]}  # 与 rubric 的 2 条上限一致
 
 
-def _judge_once(client: OpenAI, model: str, system_prompt: str, user_content: str) -> dict | None:
-    """单次判分调用；解析失败返回 None。"""
+def _log_parse_failure(aspect: str, raw: str, finish_reason: str) -> None:
+    """解析最终失败时把原始输出落盘——"未判"必须留下可查证据（批次 2.5）。
+
+    追加写到 app/evaluation/runs/judge_failures.jsonl（一行一条）。记录
+    finish_reason：length = 输出被截断（该加预算），stop = 格式不合规（该改 prompt），
+    两类问题的修法不同，所以必须区分记录。
+    """
+    try:
+        with _FAIL_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "aspect": aspect,
+                "rubric_version": JUDGE_PROMPT_VERSION,
+                "finish_reason": finish_reason,
+                "raw": raw[:4000],
+            }, ensure_ascii=False) + "\n")
+    except Exception as e:  # noqa: BLE001 —— 诊断日志失败不能影响评测
+        logger.warning("judge 失败日志写入失败（忽略）: %s", e)
+
+
+def _judge_once(client: OpenAI, model: str, system_prompt: str,
+                user_content: str, call_name: str = "") -> tuple:
+    """单次判分调用；返回 (解析结果或 None, 原始输出, finish_reason)。
+
+    call_name 仅在调用方确认 client 已被 langfuse 包装时传入（看板可读性）。
+    """
+    kwargs = {"name": call_name} if call_name else {}
     response = client.chat.completions.create(
         model=model,
         temperature=JUDGE_TEMPERATURE,
@@ -87,10 +123,13 @@ def _judge_once(client: OpenAI, model: str, system_prompt: str, user_content: st
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
+        **kwargs,
     )
-    if getattr(response.choices[0], "finish_reason", "stop") != "stop":
-        return None
-    return _parse_judge_response(response.choices[0].message.content or "")
+    content = response.choices[0].message.content or ""
+    finish_reason = getattr(response.choices[0], "finish_reason", "") or ""
+    if finish_reason != "stop":
+        return None, content, finish_reason
+    return _parse_judge_response(content), content, finish_reason
 
 
 def judge_aspect(
@@ -98,6 +137,7 @@ def judge_aspect(
     model: str,
     aspect: str,
     turns: list[dict],
+    call_name: str = "",
 ) -> dict | None:
     """对指定维度判分。turns 为按轮组织的材料：
 
@@ -105,7 +145,8 @@ def judge_aspect(
 
     - answer_quality：材料 = 各轮用户问题 + 最终回复（只评最终回复）；
     - process：逐轮给出「该轮问题 → 该轮调用序列」，消除 v1 材料错位。
-    失败重试一次，再失败返回 None（报告标"未判"）。
+    call_name：传入时作为 Langfuse observation 名（调用方需确认 client 已被包装）。
+    失败重试一次，再失败返回 None（报告标"未判"），并把原始输出落盘留证。
     """
     rubric = _ASPECT_RUBRICS.get(aspect)
     if rubric is None or not turns:
@@ -127,10 +168,14 @@ def judge_aspect(
             blocks.append(f"第 {i + 1} 轮用户：{t['question']}\n第 {i + 1} 轮工具调用：\n{calls}")
         user_content = "【按轮对齐的工具调用材料】\n" + "\n\n".join(blocks)
 
-    result = _judge_once(client, model, rubric, user_content)
+    result, raw, finish_reason = _judge_once(client, model, rubric, user_content, call_name)
     if result is None:
         # 格式抖动偶发：重试一次，再失败才放弃
-        result = _judge_once(client, model, rubric, user_content)
-    if result is not None:
+        result, raw, finish_reason = _judge_once(
+            client, model, rubric, user_content, call_name
+        )
+    if result is None:
+        _log_parse_failure(aspect, raw, finish_reason)  # "未判"必须留下证据
+    else:
         result["prompt_version"] = JUDGE_PROMPT_VERSION  # 落盘可归因：分数对应哪版 rubric
     return result

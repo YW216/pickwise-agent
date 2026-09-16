@@ -9,6 +9,9 @@
    所有 LLM 调用的 token、被请求的工具、延迟——无需改动 chat.py / orchestrator.py。
    工具返回值则通过包裹 ToolManager.execute_tool 采集。
 3. 执行：顺序跑完用例的多轮输入，把过程与结果填进 RunTrace 返回。
+4. 上报（批次 2，可选）：reporter 开启时整条用例包在 Langfuse 用例 span 里——
+   drop-in 采集的 LLM 调用与这里显式上报的工具 span 自动归入同一 trace；
+   上报关闭（未配 KEY/离线）时全链路 no-op。
 
 关键：绝不调用 agent.close()（会触发长期记忆巩固的 LLM 写入，污染且烧钱）；
 所有补丁在 finally 中还原。
@@ -22,17 +25,23 @@ from pathlib import Path
 
 from app.config.settings import settings
 from app.evaluation.dataset import EvalCase
+from app.evaluation.reporter import LangfuseReporter
 from app.evaluation.trace import LLMCallRecord, RunTrace, ToolObservation
 
 
 class Sandbox:
     """Agent 评估沙箱：构建隔离环境、插桩采集、跑用例产出 RunTrace。"""
 
-    def __init__(self, mode: str = "multi", tmp_root: str | None = None):
+    def __init__(self, mode: str = "multi", tmp_root: str | None = None,
+                 reporter: LangfuseReporter | None = None):
         # mode 保留参数以兼容旧调用方；single（旧客服 EcomAgent）已随 chat.py 删除
         self.mode = mode
         self.tmp_root = Path(tmp_root) if tmp_root else Path(tempfile.mkdtemp(prefix="eval_sandbox_"))
         self.tmp_root.mkdir(parents=True, exist_ok=True)
+        # 上报器：默认 no-op（离线自检/未配置时零影响）
+        self.reporter = reporter or LangfuseReporter.disabled()
+        # drop-in 是否已给 client 打补丁（决定能否注入 name= 等 Langfuse 专用参数）
+        self._lf_naming = False
 
     def session_path_for(self, case_id: str) -> str:
         return str(self.tmp_root / f"{case_id}.json")
@@ -58,32 +67,40 @@ class Sandbox:
 
         agent = None
         patches: list[tuple] = []  # (obj, attr, original) 供还原
-        try:
-            agent = self._build_agent(session_path)
-            self._instrument(agent, trace, patches)
+        with self.reporter.case_scope(case.id, case.category) as trace_id:
+            trace.langfuse_trace_id = trace_id
+            try:
+                agent = self._build_agent(session_path)
+                self._instrument(agent, trace, patches)
 
-            for turn in case.turns:
-                reply = agent.chat(turn)
-                trace.replies.append(reply)
-                trace.routes.append(list(trace._pending_route or []))
-                trace._pending_route = []
-                # 轮次边界：本轮结束时的观测数，供 process judge 按轮切分调用序列
-                trace.tool_boundaries.append(len(trace.tool_observations))
+                for turn in case.turns:
+                    reply = agent.chat(turn)
+                    trace.replies.append(reply)
+                    trace.routes.append(list(trace._pending_route or []))
+                    trace._pending_route = []
+                    # 轮次边界：本轮结束时的观测数，供 process judge 按轮切分调用序列
+                    trace.tool_boundaries.append(len(trace.tool_observations))
 
-        except Exception as e:  # noqa: BLE001 —— 单条用例异常不应中断整轮评估
-            trace.error = f"{type(e).__name__}: {e}"
-        finally:
-            for obj, attr, original in patches:
-                setattr(obj, attr, original)
-            if agent is not None:
-                self._close_tool_managers(agent)
-            # 注意：刻意不调用 agent.close()，避免长期记忆巩固写入
+            except Exception as e:  # noqa: BLE001 —— 单条用例异常不应中断整轮评估
+                trace.error = f"{type(e).__name__}: {e}"
+            finally:
+                for obj, attr, original in patches:
+                    setattr(obj, attr, original)
+                if agent is not None:
+                    self._close_tool_managers(agent)
+                # 注意：刻意不调用 agent.close()，避免长期记忆巩固写入
 
         return trace
 
     # ---------- 插桩 ----------
     def _instrument(self, agent, trace: RunTrace, patches: list[tuple]) -> None:
         """给共享 client、各 ToolManager、（多 Agent）Router 打补丁。"""
+        # drop-in 是否已给该 client 打补丁（wrapt 类级补丁，全局生效）——决定能否
+        # 安全注入 name= 等 Langfuse 专用参数（未打补丁时注入会漏给真 API 报错）
+        self._lf_naming = bool(self.reporter.enabled) and self.reporter.is_instrumented(
+            agent.client
+        )
+
         # 1) LLM client：create + beta.parse
         completions = agent.client.chat.completions
         patches.append((completions, "create", completions.create))
@@ -105,18 +122,22 @@ class Sandbox:
 
     def _wrap_create(self, original, trace: RunTrace):
         def wrapper(*args, **kwargs):
+            purpose = self._guess_purpose(kwargs)
+            # 给 Langfuse drop-in 传 name（看板里显示 agent:router/react/answer，
+            # 否则清一色 "OpenAI-generation"）；仅在补丁确实生效时才传，避免漏给真 API
+            if self._lf_naming:
+                kwargs.setdefault("name", f"agent:{purpose}")
             start = time.time()
             response = original(*args, **kwargs)
             latency_ms = (time.time() - start) * 1000
-            self._record_llm_call(
-                trace, response, latency_ms,
-                purpose=self._guess_purpose(kwargs),
-            )
+            self._record_llm_call(trace, response, latency_ms, purpose=purpose)
             return response
         return wrapper
 
     def _wrap_parse(self, original, trace: RunTrace):
         def wrapper(*args, **kwargs):
+            if self._lf_naming:
+                kwargs.setdefault("name", "agent:extract")
             start = time.time()
             response = original(*args, **kwargs)
             latency_ms = (time.time() - start) * 1000
@@ -126,7 +147,12 @@ class Sandbox:
 
     def _wrap_execute_tool(self, original, trace: RunTrace):
         def wrapper(name: str, arguments: dict) -> str:
-            result_str = original(name, arguments)
+            # 工具执行上报为独立 span（input=参数，output=结果信封）——当前 trace
+            # 由 run() 的 case_scope 决定；上报关闭时 span 为 None，纯旁路
+            with self.reporter.tool_span(name, dict(arguments)) as span:
+                result_str = original(name, arguments)
+                if span is not None:
+                    span.update(output=result_str)
             trace.tool_observations.append(
                 ToolObservation(name=name, arguments=dict(arguments), result=result_str)
             )
@@ -143,12 +169,20 @@ class Sandbox:
     # ---------- 辅助 ----------
     @staticmethod
     def _guess_purpose(kwargs: dict) -> str:
-        """启发式标注 LLM 调用用途，仅供报告可读，不作硬断言。"""
-        if kwargs.get("max_tokens") == 10:
+        """启发式标注 LLM 调用用途（报告/看板可读，不作硬断言）。
+
+        判据与调用方对齐（2026-09-16 修正：旧判据 max_tokens==10 早已过时——
+        router 现用 512，导致全部调用被误标 react）：
+        - router：轻量分类，max_tokens 很小（router.py=512）
+        - react：带 tools 的子 Agent ReAct 循环
+        - answer：大预算且无 tools（最终回复 / Result 整合；摘要调用也落此档）
+        """
+        max_tokens = kwargs.get("max_tokens") or 0
+        if max_tokens and max_tokens <= 1024:
             return "router"
         if kwargs.get("tools"):
             return "react"
-        return "react"
+        return "answer"
 
     @staticmethod
     def _record_llm_call(trace: RunTrace, response, latency_ms: float, purpose: str) -> None:
@@ -158,8 +192,11 @@ class Sandbox:
         total_tokens = getattr(usage, "total_tokens", 0) or 0
 
         tool_calls: list[dict] = []
+        finish_reason = ""
         try:
-            message = response.choices[0].message
+            choice = response.choices[0]
+            finish_reason = getattr(choice, "finish_reason", "") or ""
+            message = choice.message
             for tc in (getattr(message, "tool_calls", None) or []):
                 tool_calls.append({
                     "name": tc.function.name,
@@ -177,6 +214,7 @@ class Sandbox:
             total_tokens=total_tokens,
             tool_calls=tool_calls,
             latency_ms=latency_ms,
+            finish_reason=finish_reason,
         ))
 
     def _tool_managers(self, agent) -> list:

@@ -16,6 +16,8 @@
   - app/evaluation/runs/<case_id>.json ：每条用例的 RunTrace 落盘
     （字段与 harness部分.md H11 事件约定对齐——将来接平台的数据资产）
   - app/evaluation/runs/report.json   ：聚合报告（含 tool_hits 命中摘要）
+  - Langfuse（配置了 LANGFUSE_* 时自动开启）：一次跑批 = 一个 session，
+    每条用例一个 trace（含 LLM/工具 span 与判分 score）；--no-report 可关闭
 """
 
 import argparse
@@ -35,6 +37,7 @@ load_dotenv(ROOT / ".env")
 from app.config.settings import settings  # noqa: E402
 from app.evaluation.dataset import load_dataset  # noqa: E402
 from app.evaluation.evaluator import Evaluator  # noqa: E402
+from app.evaluation.reporter import LangfuseReporter  # noqa: E402
 from app.evaluation.sandbox import Sandbox  # noqa: E402
 
 RUNS_DIR = ROOT / "app" / "evaluation" / "runs"
@@ -163,6 +166,17 @@ def _print_report(report) -> None:
     if all_checks:
         print(f"  断言全貌      : {len(all_checks) - len(failed_checks)}/{len(all_checks)} 项检查通过")
 
+    # 截断诊断：finish_reason≠stop 的调用是"回复中途断掉"类问题的唯一线索（批次 2.5）
+    abnormal = [
+        (r.case_id, r.trace.abnormal_llm_calls)
+        for r in report.results if r.trace and r.trace.abnormal_llm_calls
+    ]
+    if abnormal:
+        detail = "、".join(f"{cid}×{len(calls)}" for cid, calls in abnormal)
+        reasons = sorted({c.finish_reason for _, calls in abnormal for c in calls})
+        print(f"  ⚠️  非正常结束的 LLM 调用: {sum(len(c) for _, c in abnormal)} 次（{detail}）")
+        print(f"     finish_reason={','.join(reasons)} —— length=输出被截断（回复中途断掉）")
+
     print("\n" + "=" * 78)
     print("  逐条明细")
     print("=" * 78)
@@ -198,6 +212,10 @@ def main() -> None:
     parser.add_argument(
         "--no-save", action="store_true", help="不落盘 runs/ 与 report.json",
     )
+    parser.add_argument(
+        "--no-report", action="store_true",
+        help="关闭 Langfuse 上报（离线/不想产生云端数据时用）",
+    )
     args = parser.parse_args()
 
     print("=" * 78)
@@ -216,10 +234,22 @@ def main() -> None:
             sys.exit(1)
     print(f"\n[1/3] 用例集: {len(cases)} 条")
 
+    # 上报器：一次跑批 = 一个 session（run_id），每条用例一个 trace
+    run_id = f"{datetime.now():%Y%m%d-%H%M%S}"
+    reporter = LangfuseReporter(run_id=run_id, enabled=not args.no_report)
+    print(
+        f"       Langfuse 上报: {'开启（session=' + run_id + '）' if reporter.enabled else '关闭（未配置 KEY 或 --no-report）'}"
+    )
+
     print("\n[2/3] 沙箱逐条运行（真调 LLM，mock 工具，独立会话）...")
     from openai import OpenAI
+    # judge 的 client 也会被 langfuse 的类级补丁接到（wrapt 全局补丁）：评测侧
+    # 不主动为其建 trace，而是由 evaluator 把 judge 调用挂回对应用例 trace 下
     client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
-    evaluator = Evaluator(sandbox=Sandbox(), client=client, model=settings.model_name)
+    evaluator = Evaluator(
+        sandbox=Sandbox(reporter=reporter), client=client,
+        model=settings.model_name, reporter=reporter,
+    )
     report = evaluator.run_all(cases)
 
     print("\n[3/3] 生成报告...")
@@ -241,6 +271,14 @@ def main() -> None:
             encoding="utf-8",
         )
         print(f"\n   轨迹与报告已落盘: {RUNS_DIR}")
+
+    if reporter.enabled:
+        reporter.flush()  # 异步批量上报，退出前落地
+        first = next((r.trace.langfuse_trace_id for r in report.results if r.trace), None)
+        url = reporter.trace_url(first)
+        print(f"   Langfuse session: {run_id}（Sessions 页可看本次跑批全部用例）")
+        if url:
+            print(f"   示例 trace: {url}")
 
     print("\n🎉 评估完成。")
     sys.exit(0 if report.passed_count == len(report.results) else 1)
