@@ -42,6 +42,8 @@ class Sandbox:
         self.reporter = reporter or LangfuseReporter.disabled()
         # drop-in 是否已给 client 打补丁（决定能否注入 name= 等 Langfuse 专用参数）
         self._lf_naming = False
+        # 是否在 Router 作用域内（供 purpose 标注；由 _wrap_route 置位）
+        self._in_router = False
 
     def session_path_for(self, case_id: str) -> str:
         return str(self.tmp_root / f"{case_id}.json")
@@ -122,7 +124,7 @@ class Sandbox:
 
     def _wrap_create(self, original, trace: RunTrace):
         def wrapper(*args, **kwargs):
-            purpose = self._guess_purpose(kwargs)
+            purpose = self._guess_purpose(kwargs, in_router=self._in_router)
             # 给 Langfuse drop-in 传 name（看板里显示 agent:router/react/answer，
             # 否则清一色 "OpenAI-generation"）；仅在补丁确实生效时才传，避免漏给真 API
             if self._lf_naming:
@@ -161,24 +163,29 @@ class Sandbox:
 
     def _wrap_route(self, original, trace: RunTrace):
         def wrapper(*args, **kwargs):
-            scenarios = original(*args, **kwargs)
+            # 进入 Router 作用域：其内部的 LLM 调用据此标为 router（见 _guess_purpose）
+            self._in_router = True
+            try:
+                scenarios = original(*args, **kwargs)
+            finally:
+                self._in_router = False
             trace._pending_route = list(scenarios)
             return scenarios
         return wrapper
 
     # ---------- 辅助 ----------
     @staticmethod
-    def _guess_purpose(kwargs: dict) -> str:
-        """启发式标注 LLM 调用用途（报告/看板可读，不作硬断言）。
+    def _guess_purpose(kwargs: dict, in_router: bool = False) -> str:
+        """标注 LLM 调用用途（报告/看板可读，不作硬断言）。
 
-        判据与调用方对齐（2026-09-16 修正：旧判据 max_tokens==10 早已过时——
-        router 现用 512，导致全部调用被误标 react）：
-        - router：轻量分类，max_tokens 很小（router.py=512）
+        判据改为**调用位置驱动**（2026-09-16 二次修正）：不再依赖 max_tokens 数值——
+        该启发式已被预算变更打破两次（max_tokens==10 过时 → 改用 ≤1024 又因 router
+        预算 512→2048 再次把 router 误标为 answer）。现在：
+        - router：在 Router.route() 作用域内发生的调用（由 _wrap_route 置标志）
         - react：带 tools 的子 Agent ReAct 循环
-        - answer：大预算且无 tools（最终回复 / Result 整合；摘要调用也落此档）
+        - answer：其余（最终回复 / Result 整合 / 摘要等其他生成调用）
         """
-        max_tokens = kwargs.get("max_tokens") or 0
-        if max_tokens and max_tokens <= 1024:
+        if in_router:
             return "router"
         if kwargs.get("tools"):
             return "react"
