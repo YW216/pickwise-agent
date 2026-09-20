@@ -1,0 +1,64 @@
+﻿=== pwd ===
+F:\Code\Vibe-coding\ecom-service-agent-main
+=== Test-Path .git ===
+True
+=== Test-Path .git\HEAD ===
+True
+=== top-level (force) ===
+.codegraph
+.cursor
+.git
+.pytest_cache
+.workbuddy
+app
+deploy
+develop_docs
+mcp_server
+report
+tests
+__pycache__
+项目学习文档
+.env
+.env.example
+.gitignore
+agentdemo.py
+main.py
+requirements.txt
+test.py
+wtest.py
+_cleanup_check.txt
+_e2e.log
+_gitcheck.txt
+_retest.log
+=== git version ===
+git version 2.53.0.windows.1
+=== git rev-parse ===
+true
+=== git log ===
+git : fatal: bad object HEAD
+所在位置 行:445 字符: 895
++ ... File $out -Append -Encoding utf8; (git log --oneline -10 2>&1) | Out- ...
++                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: bad object HEAD:String) [] 
+   , RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+=== git status ===
+git : fatal: bad object HEAD
+所在位置 行:445 字符: 1025
++ ... ut-File $out -Append -Encoding utf8; (git status --short 2>&1 | Selec ...
++                                           ~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: bad object HEAD:String) [] 
+   , RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+=== git reflog ===
+git : fatal: bad object HEAD
+所在位置 行:445 字符: 1178
++ ...  | Out-File $out -Append -Encoding utf8; (git reflog -15 2>&1) | Out- ...
++                                               ~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: bad object HEAD:String) [] 
+   , RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+=== done ===

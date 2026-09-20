@@ -7,7 +7,10 @@
 2. 插桩：单/多 Agent 都只共享一个 OpenAI client 实例，给它的
    chat.completions.create / beta.chat.completions.parse 打补丁，即可捕获整个会话
    所有 LLM 调用的 token、被请求的工具、延迟——无需改动 chat.py / orchestrator.py。
-   工具返回值则通过包裹 ToolManager.execute_tool 采集。
+   工具返回值通过包裹 ToolManager.execute_tool 采集；Router.route 采集每轮路由；
+   SubAgent.handle 用于把用例的 OTel 上下文重挂进工作线程（见 _wrap_handle——
+   线程池会切断 contextvars，不重挂则工具 span 与子 Agent 的 generation 会被
+   langfuse 直接跳过）。
 3. 执行：顺序跑完用例的多轮输入，把过程与结果填进 RunTrace 返回。
 4. 上报（批次 2，可选）：reporter 开启时整条用例包在 Langfuse 用例 span 里——
    drop-in 采集的 LLM 调用与这里显式上报的工具 span 自动归入同一 trace；
@@ -44,6 +47,8 @@ class Sandbox:
         self._lf_naming = False
         # 是否在 Router 作用域内（供 purpose 标注；由 _wrap_route 置位）
         self._in_router = False
+        # 用例 span 的 OTel 上下文（供工作线程重挂；由 _capture_otel_context 置位）
+        self._otel_ctx = None
 
     def session_path_for(self, case_id: str) -> str:
         return str(self.tmp_root / f"{case_id}.json")
@@ -96,12 +101,15 @@ class Sandbox:
 
     # ---------- 插桩 ----------
     def _instrument(self, agent, trace: RunTrace, patches: list[tuple]) -> None:
-        """给共享 client、各 ToolManager、（多 Agent）Router 打补丁。"""
+        """给共享 client、各 ToolManager、Router、子 Agent 执行入口打补丁。"""
         # drop-in 是否已给该 client 打补丁（wrapt 类级补丁，全局生效）——决定能否
         # 安全注入 name= 等 Langfuse 专用参数（未打补丁时注入会漏给真 API 报错）
         self._lf_naming = bool(self.reporter.enabled) and self.reporter.is_instrumented(
             agent.client
         )
+
+        # 0) 线程上下文：记下用例 span 的 OTel 上下文，供工作线程重挂（见 _wrap_handle）
+        self._otel_ctx = self._capture_otel_context()
 
         # 1) LLM client：create + beta.parse
         completions = agent.client.chat.completions
@@ -121,6 +129,15 @@ class Sandbox:
         if self.mode == "multi" and hasattr(agent, "router"):
             patches.append((agent.router, "route", agent.router.route))
             agent.router.route = self._wrap_route(agent.router.route, trace)
+
+        # 4) 子 Agent 执行入口：工作线程内重挂 OTel 上下文。
+        #    编排器无条件用 ThreadPoolExecutor（N=1 也走线程池），而 OTel 的"当前
+        #    span"由 contextvars 承载——跨线程不传递（实测工作线程内
+        #    get_current_span() 返回 INVALID_SPAN）。langfuse 拿不到活动 span 时会
+        #    **直接跳过**该 observation，导致工具 span 与子 Agent 的 generation 全丢。
+        for sub in getattr(agent, "agents", {}).values():
+            patches.append((sub, "handle", sub.handle))
+            sub.handle = self._wrap_handle(sub.handle)
 
     def _wrap_create(self, original, trace: RunTrace):
         def wrapper(*args, **kwargs):
@@ -171,6 +188,44 @@ class Sandbox:
                 self._in_router = False
             trace._pending_route = list(scenarios)
             return scenarios
+        return wrapper
+
+    # ---------- 线程上下文（评测侧补齐，不改产品代码） ----------
+
+    @staticmethod
+    def _capture_otel_context():
+        """捕获当前（用例）span 的 OTel 上下文，供工作线程重挂。
+
+        纯旁观能力：未装 langfuse / opentelemetry、或当前没有有效 span 时返回 None，
+        调用方退化为直通，评测结果不受任何影响。
+        """
+        try:
+            from opentelemetry import trace as otel_trace_api
+
+            span = otel_trace_api.get_current_span()
+            if not span.get_span_context().is_valid:
+                return None
+            return otel_trace_api.set_span_in_context(span)
+        except Exception:  # noqa: BLE001 —— 上报是旁路，任何失败都不该影响评测
+            return None
+
+    def _wrap_handle(self, original):
+        """把子 Agent 的 handle() 包在用例的 OTel 上下文里执行。
+
+        目的：让工作线程内产生的 LLM 调用（drop-in 自动捕获）与工具 span 都能找到
+        "当前 span"，从而挂到用例 trace 上。`attach` 的效果限于当前线程（底层是
+        contextvars），因此多场景并行时每个工作线程各自 attach，互不干扰。
+        """
+        def wrapper(*args, **kwargs):
+            if self._otel_ctx is None:
+                return original(*args, **kwargs)
+            from opentelemetry import context as otel_context_api
+
+            token = otel_context_api.attach(self._otel_ctx)
+            try:
+                return original(*args, **kwargs)
+            finally:
+                otel_context_api.detach(token)
         return wrapper
 
     # ---------- 辅助 ----------

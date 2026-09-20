@@ -1,0 +1,183 @@
+﻿=== .git/HEAD ===
+ref: refs/heads/main
+=== .git top-level ===
+hooks
+info
+logs
+objects
+refs
+COMMIT_EDITMSG
+config
+description
+HEAD
+index
+=== .git/objects top-level ===
+00
+01
+02
+26
+30
+36
+37
+38
+3b
+40
+44
+45
+46
+48
+4a
+4c
+4d
+4f
+52
+54
+55
+57
+58
+59
+5a
+5b
+5c
+5e
+61
+63
+68
+69
+6a
+6b
+6d
+6f
+70
+71
+73
+74
+76
+78
+7a
+7d
+7e
+7f
+80
+81
+86
+87
+88
+89
+8a
+8b
+8c
+8d
+8e
+8f
+90
+91
+93
+94
+95
+96
+97
+98
+99
+9a
+9c
+9e
+9f
+a0
+a1
+a2
+a3
+a4
+a6
+a7
+a9
+aa
+ab
+ac
+ad
+ae
+af
+b0
+b1
+b2
+b3
+b4
+b5
+b8
+b9
+ba
+bb
+bd
+be
+bf
+c0
+c1
+c3
+c4
+c5
+c6
+c7
+c8
+c9
+ca
+cc
+cd
+ce
+d0
+d1
+d2
+d3
+d4
+d8
+da
+db
+dd
+de
+e0
+e1
+e2
+e3
+e4
+e5
+e6
+e7
+e8
+e9
+ea
+ec
+ed
+ee
+ef
+f0
+f1
+f3
+f4
+f5
+f7
+f8
+fa
+fb
+fd
+ff
+=== refs recurse ===
+F:\Code\Vibe-coding\ecom-service-agent-main\.git\refs\heads
+F:\Code\Vibe-coding\ecom-service-agent-main\.git\refs\heads\main
+=== refs file contents ===
+F:\Code\Vibe-coding\ecom-service-agent-main\.git\refs\heads\main  ==>  046cd38b99d59d4f3ae84f70975e17f45eea4801
+
+=== packed-refs ===
+=== logs/HEAD tail ===
+=== ORIG_HEAD / MERGE_HEAD ===
+HEAD
+=== git count-objects -v ===
+count: 164
+size: 862
+in-pack: 0
+packs: 0
+size-pack: 0
+prune-packable: 0
+garbage: 0
+size-garbage: 0
+=== git branch -a ===
+* main
+=== done ===

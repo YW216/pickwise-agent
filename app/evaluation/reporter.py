@@ -8,8 +8,10 @@
   score = 判分结果（e2e_pass / judge_* / tools_hit_rate）。
 
 langfuse 4.x API 要点（已核 4.15.3 源码，勿按旧版文档写）：
-- drop-in 只认 langfuse_prompt / langfuse_public_key 两个前缀参数；trace 归组与
-  session 走 OTel 上下文传播，不通过 create() 的 kwarg（避免未知参数泄漏给真 API）；
+- drop-in 会**消费掉** 6 个专用 kwarg（metadata / name / langfuse_prompt /
+  langfuse_public_key / trace_id / parent_observation_id），其余 kwargs 才透传给真
+  API（见 OpenAiArgsExtractor.get_openai_args）；name 未传时节点显示为
+  "OpenAI-generation"。trace 归组与 session 仍走 OTel 上下文传播（不靠 create()）；
 - propagate_attributes(session_id/tags/trace_name) 设置 trace 级属性；
 - start_as_current_observation(as_type="span") 建用例 span；drop-in 的 generation
   与工具 span 会自动挂到"当前 span"下（实测同 trace，无需注入 trace_id）；

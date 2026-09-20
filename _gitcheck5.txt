@@ -1,0 +1,395 @@
+﻿=== timestamps ===
+1788238082  ->  2026-09-01 12:48:02
+1789526271  ->  2026-09-16 10:37:51
+1789532936  ->  2026-09-16 12:28:56
+1789545234  ->  2026-09-16 15:53:54
+1789547019  ->  2026-09-16 16:23:39
+1789548494  ->  2026-09-16 16:48:14
+1789548814  ->  2026-09-16 16:53:34
+1789551478  ->  2026-09-16 17:37:58
+1789612321  ->  2026-09-17 10:32:01
+=== fsck full (all) ===
+git : error: refs/heads/main: invalid sha1 pointer 046cd38b99d59d4f3ae84f70975e
+17f45eea4801
+所在位置 行:445 字符: 480
++ ... t -Append -Encoding utf8; (git fsck --full --no-progress 2>&1) | Out- ...
++                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: refs/hea...75e17f45eea4801 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+error: HEAD: invalid sha1 pointer 046cd38b99d59d4f3ae84f70975e17f45eea4801
+error: HEAD: invalid reflog entry 46939366fce0b8c6b647540d681d0243c8d0b174
+error: HEAD: invalid reflog entry 46939366fce0b8c6b647540d681d0243c8d0b174
+error: HEAD: invalid reflog entry 715672731d18b99671e103385fc1127259a44a48
+error: HEAD: invalid reflog entry 715672731d18b99671e103385fc1127259a44a48
+error: HEAD: invalid reflog entry 57c034f864587c94e2cc3c50695ec0e98e19d5a1
+error: HEAD: invalid reflog entry 57c034f864587c94e2cc3c50695ec0e98e19d5a1
+error: HEAD: invalid reflog entry 4ea659e39cb104b5d01f1a719faf1cf2327941b8
+error: HEAD: invalid reflog entry 4ea659e39cb104b5d01f1a719faf1cf2327941b8
+error: HEAD: invalid reflog entry 214e289bb414c6722298433eda2568f5ef2f7375
+error: HEAD: invalid reflog entry 214e289bb414c6722298433eda2568f5ef2f7375
+error: HEAD: invalid reflog entry 84877f24e1ed5aa328d3fa2caccfc512959c8350
+error: HEAD: invalid reflog entry 84877f24e1ed5aa328d3fa2caccfc512959c8350
+error: HEAD: invalid reflog entry bfb7db519aeebc47ea4bef484c54b5a93b2b75f4
+error: HEAD: invalid reflog entry bfb7db519aeebc47ea4bef484c54b5a93b2b75f4
+error: HEAD: invalid reflog entry b471d974d2c31b2fce9098d74a130b33912854d8
+error: HEAD: invalid reflog entry b471d974d2c31b2fce9098d74a130b33912854d8
+error: HEAD: invalid reflog entry 92bb42cd288f67769db6c518de3676abc4ffb5b0
+error: HEAD: invalid reflog entry 92bb42cd288f67769db6c518de3676abc4ffb5b0
+error: HEAD: invalid reflog entry d691d260361fe9f934d7a1694cdf3388123f19f9
+error: HEAD: invalid reflog entry d691d260361fe9f934d7a1694cdf3388123f19f9
+error: HEAD: invalid reflog entry 902b62ff1c0daa64eef4eb6f4e0c38e1ecd5a982
+error: HEAD: invalid reflog entry 902b62ff1c0daa64eef4eb6f4e0c38e1ecd5a982
+error: HEAD: invalid reflog entry 58410b047d5f0c5f6c4e07eea97185872c0a544c
+error: HEAD: invalid reflog entry 58410b047d5f0c5f6c4e07eea97185872c0a544c
+error: HEAD: invalid reflog entry 960a34c084de628661fb187c20915abd81cddac6
+error: HEAD: invalid reflog entry 960a34c084de628661fb187c20915abd81cddac6
+error: HEAD: invalid reflog entry 7fe7d0e20ddb1276912c03390c8d3bd991a9215c
+error: HEAD: invalid reflog entry 7fe7d0e20ddb1276912c03390c8d3bd991a9215c
+error: HEAD: invalid reflog entry dcf9b0c7e49a843c6f12a27168d6abf07e91ed0a
+error: HEAD: invalid reflog entry dcf9b0c7e49a843c6f12a27168d6abf07e91ed0a
+error: HEAD: invalid reflog entry 1f0bae80a45a9f64a67cef724da9953f76c14dfb
+error: HEAD: invalid reflog entry 1f0bae80a45a9f64a67cef724da9953f76c14dfb
+error: HEAD: invalid reflog entry 500bc7110502ab170154cfb70e48cb55b9a17fe9
+error: HEAD: invalid reflog entry 500bc7110502ab170154cfb70e48cb55b9a17fe9
+error: HEAD: invalid reflog entry c922b510d007ce948e01eb3702f3ca5047c776b5
+error: HEAD: invalid reflog entry c922b510d007ce948e01eb3702f3ca5047c776b5
+error: HEAD: invalid reflog entry 61cc464d4743c76a5351fa21001f2a0196fb1719
+error: HEAD: invalid reflog entry 61cc464d4743c76a5351fa21001f2a0196fb1719
+error: HEAD: invalid reflog entry f2cf57080db883d9161261c51a2aa193bc1f0046
+error: HEAD: invalid reflog entry f2cf57080db883d9161261c51a2aa193bc1f0046
+error: HEAD: invalid reflog entry 2ac30a6f32e3f28d8ec56cafccda4dd4201370eb
+error: HEAD: invalid reflog entry 2ac30a6f32e3f28d8ec56cafccda4dd4201370eb
+error: HEAD: invalid reflog entry 20e365b9b4f3c4d25efc5654c9af74e862158d55
+error: HEAD: invalid reflog entry 20e365b9b4f3c4d25efc5654c9af74e862158d55
+error: HEAD: invalid reflog entry da85a3e1302587e9f40a602dd72a5e21c0cc73f9
+error: HEAD: invalid reflog entry da85a3e1302587e9f40a602dd72a5e21c0cc73f9
+error: HEAD: invalid reflog entry 78784a447b0021d9675c865485eed1862a9edeaf
+error: HEAD: invalid reflog entry 78784a447b0021d9675c865485eed1862a9edeaf
+error: HEAD: invalid reflog entry 17e08627a1c516f838ccaf0e7d9e26f3c5e94a14
+error: HEAD: invalid reflog entry 17e08627a1c516f838ccaf0e7d9e26f3c5e94a14
+error: HEAD: invalid reflog entry 2c55d472198217c15f0cd7388e045097438a6a68
+error: HEAD: invalid reflog entry 2c55d472198217c15f0cd7388e045097438a6a68
+error: HEAD: invalid reflog entry acc9503ae377e247329a97557d40ab7685009a1b
+error: HEAD: invalid reflog entry acc9503ae377e247329a97557d40ab7685009a1b
+error: HEAD: invalid reflog entry 9f77db64771c972a4f1abe3b27aab37a1b57539c
+error: HEAD: invalid reflog entry 9f77db64771c972a4f1abe3b27aab37a1b57539c
+error: HEAD: invalid reflog entry d9de25a58f6b8197d8e8b8cd97fecf4faf331074
+error: HEAD: invalid reflog entry d9de25a58f6b8197d8e8b8cd97fecf4faf331074
+error: HEAD: invalid reflog entry 0515058cdec2ec5779ea7620107fedea1708d367
+error: HEAD: invalid reflog entry 0515058cdec2ec5779ea7620107fedea1708d367
+error: HEAD: invalid reflog entry 79750481a624dc56a63d19bef9240ffd8e9abc92
+error: HEAD: invalid reflog entry 79750481a624dc56a63d19bef9240ffd8e9abc92
+error: HEAD: invalid reflog entry 43604b2b3320f5038fd848b3f331ff139c8d2ebb
+error: HEAD: invalid reflog entry 43604b2b3320f5038fd848b3f331ff139c8d2ebb
+error: HEAD: invalid reflog entry 4918d06bcd4d11623dd3769c222ff4ceffd4d7d8
+error: HEAD: invalid reflog entry 4918d06bcd4d11623dd3769c222ff4ceffd4d7d8
+error: HEAD: invalid reflog entry 8c32a4848e3685be93cc9ea38f80a0d076f994ab
+error: HEAD: invalid reflog entry 8c32a4848e3685be93cc9ea38f80a0d076f994ab
+error: HEAD: invalid reflog entry 07e1494b1a5a40ade402ae2bee26f275e0eea288
+error: HEAD: invalid reflog entry 07e1494b1a5a40ade402ae2bee26f275e0eea288
+error: HEAD: invalid reflog entry fdf875a0377573663bf0374c2c5b60364666e2c1
+error: HEAD: invalid reflog entry 305fe30fbe849d9582e5126e024b5711f8a139d3
+error: HEAD: invalid reflog entry 305fe30fbe849d9582e5126e024b5711f8a139d3
+error: HEAD: invalid reflog entry 328ded35aaf0e32e3a5ded9e0264ac23d38a59b7
+error: HEAD: invalid reflog entry 328ded35aaf0e32e3a5ded9e0264ac23d38a59b7
+error: HEAD: invalid reflog entry 046cd38b99d59d4f3ae84f70975e17f45eea4801
+error: refs/heads/main: invalid reflog entry 46939366fce0b8c6b647540d681d0243c8
+d0b174
+error: refs/heads/main: invalid reflog entry 46939366fce0b8c6b647540d681d0243c8
+d0b174
+error: refs/heads/main: invalid reflog entry 715672731d18b99671e103385fc1127259
+a44a48
+error: refs/heads/main: invalid reflog entry 715672731d18b99671e103385fc1127259
+a44a48
+error: refs/heads/main: invalid reflog entry 57c034f864587c94e2cc3c50695ec0e98e
+19d5a1
+error: refs/heads/main: invalid reflog entry 57c034f864587c94e2cc3c50695ec0e98e
+19d5a1
+error: refs/heads/main: invalid reflog entry 4ea659e39cb104b5d01f1a719faf1cf232
+7941b8
+error: refs/heads/main: invalid reflog entry 4ea659e39cb104b5d01f1a719faf1cf232
+7941b8
+error: refs/heads/main: invalid reflog entry 214e289bb414c6722298433eda2568f5ef
+2f7375
+error: refs/heads/main: invalid reflog entry 214e289bb414c6722298433eda2568f5ef
+2f7375
+error: refs/heads/main: invalid reflog entry 84877f24e1ed5aa328d3fa2caccfc51295
+9c8350
+error: refs/heads/main: invalid reflog entry 84877f24e1ed5aa328d3fa2caccfc51295
+9c8350
+error: refs/heads/main: invalid reflog entry bfb7db519aeebc47ea4bef484c54b5a93b
+2b75f4
+error: refs/heads/main: invalid reflog entry bfb7db519aeebc47ea4bef484c54b5a93b
+2b75f4
+error: refs/heads/main: invalid reflog entry b471d974d2c31b2fce9098d74a130b3391
+2854d8
+error: refs/heads/main: invalid reflog entry b471d974d2c31b2fce9098d74a130b3391
+2854d8
+error: refs/heads/main: invalid reflog entry 92bb42cd288f67769db6c518de3676abc4
+ffb5b0
+error: refs/heads/main: invalid reflog entry 92bb42cd288f67769db6c518de3676abc4
+ffb5b0
+error: refs/heads/main: invalid reflog entry d691d260361fe9f934d7a1694cdf338812
+3f19f9
+error: refs/heads/main: invalid reflog entry d691d260361fe9f934d7a1694cdf338812
+3f19f9
+error: refs/heads/main: invalid reflog entry 902b62ff1c0daa64eef4eb6f4e0c38e1ec
+d5a982
+error: refs/heads/main: invalid reflog entry 902b62ff1c0daa64eef4eb6f4e0c38e1ec
+d5a982
+error: refs/heads/main: invalid reflog entry 58410b047d5f0c5f6c4e07eea97185872c
+0a544c
+error: refs/heads/main: invalid reflog entry 58410b047d5f0c5f6c4e07eea97185872c
+0a544c
+error: refs/heads/main: invalid reflog entry 960a34c084de628661fb187c20915abd81
+cddac6
+error: refs/heads/main: invalid reflog entry 960a34c084de628661fb187c20915abd81
+cddac6
+error: refs/heads/main: invalid reflog entry 7fe7d0e20ddb1276912c03390c8d3bd991
+a9215c
+error: refs/heads/main: invalid reflog entry 7fe7d0e20ddb1276912c03390c8d3bd991
+a9215c
+error: refs/heads/main: invalid reflog entry dcf9b0c7e49a843c6f12a27168d6abf07e
+91ed0a
+error: refs/heads/main: invalid reflog entry dcf9b0c7e49a843c6f12a27168d6abf07e
+91ed0a
+error: refs/heads/main: invalid reflog entry 1f0bae80a45a9f64a67cef724da9953f76
+c14dfb
+error: refs/heads/main: invalid reflog entry 1f0bae80a45a9f64a67cef724da9953f76
+c14dfb
+error: refs/heads/main: invalid reflog entry 500bc7110502ab170154cfb70e48cb55b9
+a17fe9
+error: refs/heads/main: invalid reflog entry 500bc7110502ab170154cfb70e48cb55b9
+a17fe9
+error: refs/heads/main: invalid reflog entry c922b510d007ce948e01eb3702f3ca5047
+c776b5
+error: refs/heads/main: invalid reflog entry c922b510d007ce948e01eb3702f3ca5047
+c776b5
+error: refs/heads/main: invalid reflog entry 61cc464d4743c76a5351fa21001f2a0196
+fb1719
+error: refs/heads/main: invalid reflog entry 61cc464d4743c76a5351fa21001f2a0196
+fb1719
+error: refs/heads/main: invalid reflog entry f2cf57080db883d9161261c51a2aa193bc
+1f0046
+error: refs/heads/main: invalid reflog entry f2cf57080db883d9161261c51a2aa193bc
+1f0046
+error: refs/heads/main: invalid reflog entry 2ac30a6f32e3f28d8ec56cafccda4dd420
+1370eb
+error: refs/heads/main: invalid reflog entry 2ac30a6f32e3f28d8ec56cafccda4dd420
+1370eb
+error: refs/heads/main: invalid reflog entry 20e365b9b4f3c4d25efc5654c9af74e862
+158d55
+error: refs/heads/main: invalid reflog entry 20e365b9b4f3c4d25efc5654c9af74e862
+158d55
+error: refs/heads/main: invalid reflog entry da85a3e1302587e9f40a602dd72a5e21c0
+cc73f9
+error: refs/heads/main: invalid reflog entry da85a3e1302587e9f40a602dd72a5e21c0
+cc73f9
+error: refs/heads/main: invalid reflog entry 78784a447b0021d9675c865485eed1862a
+9edeaf
+error: refs/heads/main: invalid reflog entry 78784a447b0021d9675c865485eed1862a
+9edeaf
+error: refs/heads/main: invalid reflog entry 17e08627a1c516f838ccaf0e7d9e26f3c5
+e94a14
+error: refs/heads/main: invalid reflog entry 17e08627a1c516f838ccaf0e7d9e26f3c5
+e94a14
+error: refs/heads/main: invalid reflog entry 2c55d472198217c15f0cd7388e04509743
+8a6a68
+error: refs/heads/main: invalid reflog entry 2c55d472198217c15f0cd7388e04509743
+8a6a68
+error: refs/heads/main: invalid reflog entry acc9503ae377e247329a97557d40ab7685
+009a1b
+error: refs/heads/main: invalid reflog entry acc9503ae377e247329a97557d40ab7685
+009a1b
+error: refs/heads/main: invalid reflog entry 9f77db64771c972a4f1abe3b27aab37a1b
+57539c
+error: refs/heads/main: invalid reflog entry 9f77db64771c972a4f1abe3b27aab37a1b
+57539c
+error: refs/heads/main: invalid reflog entry d9de25a58f6b8197d8e8b8cd97fecf4faf
+331074
+error: refs/heads/main: invalid reflog entry d9de25a58f6b8197d8e8b8cd97fecf4faf
+331074
+error: refs/heads/main: invalid reflog entry 0515058cdec2ec5779ea7620107fedea17
+08d367
+error: refs/heads/main: invalid reflog entry 0515058cdec2ec5779ea7620107fedea17
+08d367
+error: refs/heads/main: invalid reflog entry 79750481a624dc56a63d19bef9240ffd8e
+9abc92
+error: refs/heads/main: invalid reflog entry 79750481a624dc56a63d19bef9240ffd8e
+9abc92
+error: refs/heads/main: invalid reflog entry 43604b2b3320f5038fd848b3f331ff139c
+8d2ebb
+error: refs/heads/main: invalid reflog entry 43604b2b3320f5038fd848b3f331ff139c
+8d2ebb
+error: refs/heads/main: invalid reflog entry 4918d06bcd4d11623dd3769c222ff4ceff
+d4d7d8
+error: refs/heads/main: invalid reflog entry 4918d06bcd4d11623dd3769c222ff4ceff
+d4d7d8
+error: refs/heads/main: invalid reflog entry 8c32a4848e3685be93cc9ea38f80a0d076
+f994ab
+error: refs/heads/main: invalid reflog entry 8c32a4848e3685be93cc9ea38f80a0d076
+f994ab
+error: refs/heads/main: invalid reflog entry 07e1494b1a5a40ade402ae2bee26f275e0
+eea288
+error: refs/heads/main: invalid reflog entry 07e1494b1a5a40ade402ae2bee26f275e0
+eea288
+error: refs/heads/main: invalid reflog entry fdf875a0377573663bf0374c2c5b603646
+66e2c1
+error: refs/heads/main: invalid reflog entry 305fe30fbe849d9582e5126e024b5711f8
+a139d3
+error: refs/heads/main: invalid reflog entry 305fe30fbe849d9582e5126e024b5711f8
+a139d3
+error: refs/heads/main: invalid reflog entry 328ded35aaf0e32e3a5ded9e0264ac23d3
+8a59b7
+error: refs/heads/main: invalid reflog entry 328ded35aaf0e32e3a5ded9e0264ac23d3
+8a59b7
+error: refs/heads/main: invalid reflog entry 046cd38b99d59d4f3ae84f70975e17f45e
+ea4801
+notice: No default references
+error: 46e12a8027acfc68b7fd1d213e7db9d5c80a8d13: invalid sha1 pointer in cache-
+tree of .git/index
+broken link from  commit fdc51b3d7dbc77053953d24f25e6514e63b60d12
+              to  commit 328ded35aaf0e32e3a5ded9e0264ac23d38a59b7
+broken link from    tree b1ae6e12059fbd8ae3dda2970b498330167a9aa4
+              to    tree 3c946ac52f38fffa45afb727502c79a15a46a015
+broken link from    tree b1ae6e12059fbd8ae3dda2970b498330167a9aa4
+              to    tree 167469f20cda859adacab5abe6879c1ca411264b
+broken link from    tree 7a1515630ba3e08487e3159727eb81781dd0236b
+              to    tree 1de44634cf7eed8154e1abeba5ab663ee9b945d0
+broken link from    tree 802b62ca0965830b75041a11db5945fa5eaa5fdf
+              to    tree 220a960585cf41d333e271c9d057334fa5c7b57f
+broken link from    tree 802b62ca0965830b75041a11db5945fa5eaa5fdf
+              to    tree 4570404bc97589fe83bd762801bed7669b78f209
+broken link from    tree e3aa0f165b2d62d278eea138d94262e1bc3cf3d9
+              to    tree 4f1c717223d41ccd68dfc95bc5aa451c5f1e0817
+broken link from    tree c6ccd2a76a3e9066660a4866027bac200f7b48ce
+              to    tree 07aa570bddd10b21772d6739fbb61c9495e4313c
+broken link from  commit ddb727b2eb9dc7fbf31d8ea66c3c07063f2409ee
+              to    tree 3b5d81d3c99c3f9ef898806049cce86337588c06
+broken link from  commit 611760dd2d283ab0ed0573ab89d3ccd25fbb845c
+              to    tree 24a2cbba252e54d49d3c7bd185a8a27054aa7a2a
+dangling blob 01b2ba4da274992a77840d8ac23b7cc8c089f991
+dangling blob 01e4b4342fd0109343a25ba860bac109997728de
+missing blob 042e0b1b0d3e85f076c6806fba8598e3b8479bcf
+missing tree 07aa570bddd10b21772d6739fbb61c9495e4313c
+missing blob 0d029050c9e8d0a8a2da678d8597bdd883244ef8
+missing blob 1270c4ad15c71c66ae429fe3321e77f774ce1e7e
+missing blob 16406d653cfeb3075343da5c4400d4fd9059881e
+missing tree 167469f20cda859adacab5abe6879c1ca411264b
+missing blob 1bec77ef8019453b7ea824bac0cd06ece362569f
+missing tree 1de44634cf7eed8154e1abeba5ab663ee9b945d0
+missing blob 2088978537ab9de3cf13455c5e76949213fd8008
+missing blob 206ed8fa9d9e9040a6586c8cd25eada37a7e9e0b
+missing blob 22aa37b16b3e3aed93e2a1f9a1b71f29aec9820f
+missing tree 220a960585cf41d333e271c9d057334fa5c7b57f
+missing tree 24a2cbba252e54d49d3c7bd185a8a27054aa7a2a
+missing blob 26f64c53b8678f3063a9f0bd7250175358af3131
+missing blob 27aa51c1771158f565aaba65e6b47a2980957fc7
+missing blob 2866c9e2e241556aa31e63275608bcaf1a7afb34
+missing blob 2ae6905fcdeb14a1f2c9ae8ec0936fe7ce7a7696
+missing blob 2b6e42b7a9e4a5eb7ee2aced09a13520b8e4d976
+missing blob 2f3ca1fd4625164557f7ce59d2033ef7d10ffc72
+missing blob 3008ba40034fd7c8875ada612a334223aa2c99f3
+missing blob 2f72f4015da8cfe4e3bf32d3e66497f55a0a0934
+missing blob 307c6510dcba47710cf0ebe6b5b052408fc72718
+missing blob 36f4ebb23b95b63b9fcb8a8fbeff77449db6fc2c
+missing blob 37a02e1e1231ae1dd4c94de6fc3657366c633c9a
+missing tree 3c946ac52f38fffa45afb727502c79a15a46a015
+missing blob 41a6317381367db17eb4c780cca3f1e263d37d27
+missing tree 4570404bc97589fe83bd762801bed7669b78f209
+missing blob 468a101a0e87e2909b724abfcac2a730df59c2ca
+missing blob 46c823ce41b8418d1570dad1865606350596788e
+missing blob 4da65ce93ad85021fa2a0f7751708e6994868c78
+missing blob 4c22eb204bb8ec65013f66ef451b3484547e8b8c
+missing tree 4f1c717223d41ccd68dfc95bc5aa451c5f1e0817
+missing blob 4d002c12362429f4bafa50e087bde0663f21d5de
+missing blob 55d888733ae631c80459474e84e4576eb185f014
+missing blob 579ec699eedeb3b5ef6c5e9e3b64010365459c11
+dangling tree 582e36add78b10b0344da478ab347b3b59aff16c
+dangling tree 618cab731eab2c0373c2d7ef60790d428cbb5432
+dangling blob 7036cba41b82ae98aeb871fe95cbc5e3ff8eba0e
+dangling blob 8b90650c8ff0f344b83a2052a8fdf8c40e1238a0
+dangling blob 99f24102f80dd3a2a625fa0335e7c71a9dc10eaa
+dangling blob a0f8622dd553af52a9a238791efd65b12409eca9
+dangling tree d3604cd50bd3bbb1a6796a55e7e7406c54626c6e
+dangling blob e99655d05186bde331644cac201daea06ce85396
+dangling tree fb0a95e24ee1ded903abee3e968743bfee28a016
+dangling blob 005f2b1e2db08dec543002269ece72de683d13a1
+dangling tree 009b71dae3a1b5c8929c516a0aad1246b3fbb487
+dangling blob 00b9a15dd0091000e33ebcecff76749338747aee
+dangling tree 00691df8fd84aa70b72000b9cbea64964521a032
+dangling tree 026f0792d123879a59fb6f01b995e4f9cd37ca91
+missing blob 0df90ea2829e95bde001711f449857c86f399afe
+missing blob 15db9a74f58176917bdc4fbd3f534c477d3ae675
+missing blob 16dd58bc35ce88cfa413f25861333b7c9e9d9194
+missing blob 179b746e978bca3124e1ba9f1ab68249f91d6663
+missing blob 198fa8ae6ea1701e636f450371ced81c2e7cdc16
+missing blob 1b23dfaa112e7eec5e733136a0933479a946b228
+missing blob 2bd10926ed2c98b782e7f1496197eb25dc68022c
+missing blob 2ff7f389d891503b5256a53f396c86a35205d661
+missing commit 328ded35aaf0e32e3a5ded9e0264ac23d38a59b7
+missing tree 3b5d81d3c99c3f9ef898806049cce86337588c06
+missing blob 4407b00c181e40112c9b9c3da75fb213d35b56c8
+missing blob 52bd820bf7103f036ea3d8ccbb1340f252c6b44c
+missing blob 55297c48643c3e49fc192b12f4df1d62d44811f4
+missing blob 5add63a44b8be11cb2bc1d2a55153f0ab2cf6d35
+dangling tree 5e1d309b69f77b5266484af14ec9599fce47472a
+dangling tree a49504785488d5f58dc4a64858171062c02a7e47
+dangling tree a6e9da93edd62329f3b02418309d184c18e85634
+dangling blob ca93a6704f466a710ffabb258f9afadf37a376b3
+dangling tree cd63093aa6bc8d91b5ca7c12b2352c5093f5544b
+dangling commit f1c337c6e4081f8be1469012771267bda37b4b70
+=== file count in ddb727b2 ===
+
+Lines Words Characters Property
+----- ----- ---------- --------
+    1                          
+
+
+=== file count in 611760dd ===
+
+Lines Words Characters Property
+----- ----- ---------- --------
+    1                          
+
+
+=== file count in fdc51b3d ===
+
+Lines Words Characters Property
+----- ----- ---------- --------
+   22                          
+
+
+=== reflog refs/heads/main tail 12 ===
+20e365b9b4f3c4d25efc5654c9af74e862158d55 da85a3e1302587e9f40a602dd72a5e21c0cc73f9 YW216 <1837535834@qq.com> 1788869267 +0800	commit: 閲嶆柊瀹氫箟璇勪及缁撴灉鏍煎紡锛屼豢鐓у鏈?da85a3e1302587e9f40a602dd72a5e21c0cc73f9 78784a447b0021d9675c865485eed1862a9edeaf YW216 <1837535834@qq.com> 1789024029 +0800	commit: refactor(rag/backends): 鍒犻櫎鏁翠釜RAG鍚戦噺鍚庣妯″潡
+78784a447b0021d9675c865485eed1862a9edeaf 17e08627a1c516f838ccaf0e7d9e26f3c5e94a14 YW216 <1837535834@qq.com> 1789024140 +0800	commit: refactor(rag): 鏀舵暃鍚戦噺鍚庣涓篗ilvus鍗曞疄鐜?17e08627a1c516f838ccaf0e7d9e26f3c5e94a14 2c55d472198217c15f0cd7388e045097438a6a68 YW216 <1837535834@qq.com> 1789121119 +0800	commit: RAG瀹炵幇1 : 瀹炵幇娣峰悎妫€绱㈠姛鑳斤紝瀹屽杽RAG閾捐矾
+2c55d472198217c15f0cd7388e045097438a6a68 acc9503ae377e247329a97557d40ab7685009a1b YW216 <1837535834@qq.com> 1789236035 +0800	commit: RAG瀹炵幇2 瀹屾垚鍟嗗搧璇箟妫€绱㈢郴缁熷叏閾捐矾瀹炶
+acc9503ae377e247329a97557d40ab7685009a1b 9f77db64771c972a4f1abe3b27aab37a1b57539c YW216 <1837535834@qq.com> 1789441827 +0800	commit: RAG瀹炵幇4: 瀹屾垚2026-09-14鍏ㄩ噺RAG浼樺寲涓庡晢鍝佹睜鎵╁
+9f77db64771c972a4f1abe3b27aab37a1b57539c d9de25a58f6b8197d8e8b8cd97fecf4faf331074 YW216 <1837535834@qq.com> 1789443950 +0800	commit: refactor: 娓呯悊搴熷純宸ュ叿骞舵洿鏂版绱㈡祦绋?d9de25a58f6b8197d8e8b8cd97fecf4faf331074 0515058cdec2ec5779ea7620107fedea1708d367 YW216 <1837535834@qq.com> 1789446316 +0800	commit: fix(test): 淇澶氭櫤鑳戒綋娴嬭瘯鐨勬暟鍊间繚鐪熸牎楠岄€昏緫
+0515058cdec2ec5779ea7620107fedea1708d367 79750481a624dc56a63d19bef9240ffd8e9abc92 YW216 <1837535834@qq.com> 1789463873 +0800	commit: 鍋滄璺熻釜 app/evaluation/runs/ 璇勪及杩愯浜х墿
+79750481a624dc56a63d19bef9240ffd8e9abc92 43604b2b3320f5038fd848b3f331ff139c8d2ebb YW216 <1837535834@qq.com> 1789463901 +0800	commit: 寮曞叆postgresql: 瀹屾垚PG鐪熷€煎眰钀藉湴涓庡叏閾捐矾鍔熻兘瀵归綈
+43604b2b3320f5038fd848b3f331ff139c8d2ebb 4918d06bcd4d11623dd3769c222ff4ceffd4d7d8 YW216 <1837535834@qq.com> 1789483490 +0800	commit: refactor: 瀹屾垚2026-09-15鏋舵瀯鏀舵暃涓庢暟鎹縼绉?4918d06bcd4d11623dd3769c222ff4ceffd4d7d8 8c32a4848e3685be93cc9ea38f80a0d076f994ab YW216 <1837535834@qq.com> 1789486025 +0800	commit: langfuse鎺ュ叆1: 鎺ュ叆Langfuse鍙娴嬫€ц拷韪兘鍔?8c32a4848e3685be93cc9ea38f80a0d076f994ab 07e1494b1a5a40ade402ae2bee26f275e0eea288 YW216 <1837535834@qq.com> 1789526212 +0800	commit: 鍋滄璺熻釜 develop_docs/ 璁捐鏂囨。锛堟湰鍦颁繚鐣欙級
+07e1494b1a5a40ade402ae2bee26f275e0eea288 fdf875a0377573663bf0374c2c5b60364666e2c1 YW216 <1837535834@qq.com> 1789526271 +0800	commit: 鍋滄璺熻釜 develop_docs/ 璁捐鏂囨。锛堟湰鍦颁繚鐣欙紝ignore 鐢熸晥锛?0000000000000000000000000000000000000000 611760dd2d283ab0ed0573ab89d3ccd25fbb845c YW216 <1837535834@qq.com> 1789532936 +0800	commit (initial): 閲嶅缓鍩虹嚎锛歡it 瀵硅薄搴撴崯鍧忓悗浠庡畬鏁村伐浣滃尯閲嶅缓
+611760dd2d283ab0ed0573ab89d3ccd25fbb845c ddb727b2eb9dc7fbf31d8ea66c3c07063f2409ee YW216 <1837535834@qq.com> 1789545234 +0800	commit: 璇勬祴鎵规1+2+2.5锛氬垽鍒嗚川閲忎慨澶?+ Langfuse 骞冲彴鍖?+ 鍙娴嬫€цˉ鍏?ddb727b2eb9dc7fbf31d8ea66c3c07063f2409ee 305fe30fbe849d9582e5126e024b5711f8a139d3 YW216 <1837535834@qq.com> 1789547019 +0800	commit: 璇勬祴鎵规3 + 涓ら」淇锛氬彲璇婃柇鎬ч棴鐜?305fe30fbe849d9582e5126e024b5711f8a139d3 328ded35aaf0e32e3a5ded9e0264ac23d38a59b7 YW216 <1837535834@qq.com> 1789548494 +0800	commit: 璇勬祴锛歱urpose 鍒ゆ嵁鏀逛负璋冪敤浣嶇疆椹卞姩锛堜笉鍐嶄緷璧?max_tokens 鏁板€硷級
+328ded35aaf0e32e3a5ded9e0264ac23d38a59b7 fdc51b3d7dbc77053953d24f25e6514e63b60d12 YW216 <1837535834@qq.com> 1789548814 +0800	commit: router锛氭樉寮忎綆鎬濊€冨己搴︼紝娑堥櫎璺敱杈撳嚭鎴柇
+fdc51b3d7dbc77053953d24f25e6514e63b60d12 046cd38b99d59d4f3ae84f70975e17f45eea4801 YW216 <1837535834@qq.com> 1789551478 +0800	commit: config锛歀angfuse 鍑瘉缁熶竴涓嬫矇鍒?settings 妗ユ帴锛屼慨澶嶅鍏ュ彛涓婃姤闈欓粯澶辨晥
+=== objects subdir mtimes ===
+
+Name LastWriteTime     
+---- -------------     
+48   2026/9/17 10:32:04
+55   2026/9/17 10:32:04
+4d   2026/9/17 10:32:04
+57   2026/9/17 10:32:04
+5a   2026/9/17 10:32:04
+46   2026/9/17 10:32:04
+45   2026/9/17 10:32:04
+30   2026/9/17 10:32:04
+37   2026/9/17 10:32:04
+3b   2026/9/17 10:32:04
+
+
+
+=== done ===

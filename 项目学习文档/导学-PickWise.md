@@ -5,18 +5,18 @@
 
 ## 1. 前置知识（面试高频标注）
 
-| 知识点 | 为何需要 | 在本项目中的位置 | 高频度 |
-| --- | --- | --- | --- |
-| OpenAI Function Calling 协议 | 整个工具系统的通信基础（tool_calls / tool 消息对） | `app/agent/tools/registry.py`、`app/multi_agent/agents.py` handle() | ⭐⭐⭐ |
-| ReAct 循环 | 子 Agent 的执行模型（思考→行动→观察循环） | `app/multi_agent/agents.py` SubAgent.handle() | ⭐⭐⭐ |
-| 多 Agent 编排（路由→并行→汇总） | 项目核心架构，面试必问 | `app/multi_agent/orchestrator.py` | ⭐⭐⭐ |
-| 上下文窗口管理 / 会话压缩 | Agent 工程核心难题，强亮点 | `app/agent/compaction.py`、`context_budget.py` | ⭐⭐⭐ |
-| LLM 评估（规则断言 + LLM-as-judge） | 自动化评估体系是近年高频考点 | `app/evaluation/` 全目录 | ⭐⭐⭐ |
-| RAG：Embedding + 向量库 + 混合检索 | 知识问答的能力底座 | `app/agent/rag/`（retriever/embedder/milvus_backend） | ⭐⭐ |
-| 记忆系统（短期/长期） | 个性化推荐与多轮体验 | `app/agent/memory/` | ⭐⭐ |
-| Agent Skills 渐进加载（Anthropic 开放标准） | 上下文经济性的典型案例 | `app/agent/skills/loader.py` | ⭐⭐ |
-| 线程池并行与 Copy-on-Write | 并行安全的工程保障 | `orchestrator._execute_agents`、`agents.handle` | ⭐⭐ |
-| pydantic-settings 配置管理 | 工程化基础 | `app/config/settings.py` | ⭐ |
+| 知识点                               | 为何需要                               | 在本项目中的位置                                                           | 高频度 |
+| --------------------------------- | ---------------------------------- | ------------------------------------------------------------------ | --- |
+| OpenAI Function Calling 协议        | 整个工具系统的通信基础（tool_calls / tool 消息对） | `app/agent/tools/registry.py`、`app/multi_agent/agents.py` handle() | ⭐⭐⭐ |
+| ReAct 循环                          | 子 Agent 的执行模型（思考→行动→观察循环）          | `app/multi_agent/agents.py` SubAgent.handle()                      | ⭐⭐⭐ |
+| 多 Agent 编排（路由→并行→汇总）              | 项目核心架构，面试必问                        | `app/multi_agent/orchestrator.py`                                  | ⭐⭐⭐ |
+| 上下文窗口管理 / 会话压缩                    | Agent 工程核心难题，强亮点                   | `app/agent/compaction.py`、`context_budget.py`                      | ⭐⭐⭐ |
+| LLM 评估（规则断言 + LLM-as-judge）       | 自动化评估体系是近年高频考点                     | `app/evaluation/` 全目录                                              | ⭐⭐⭐ |
+| RAG：Embedding + 向量库 + 混合检索        | 知识问答的能力底座                          | `app/agent/rag/`（retriever/embedder/milvus_backend）                | ⭐⭐  |
+| 记忆系统（短期/长期）                       | 个性化推荐与多轮体验                         | `app/agent/memory/`                                                | ⭐⭐  |
+| Agent Skills 渐进加载（Anthropic 开放标准） | 上下文经济性的典型案例                        | `app/agent/skills/loader.py`                                       | ⭐⭐  |
+| 线程池并行与 Copy-on-Write              | 并行安全的工程保障                          | `orchestrator._execute_agents`、`agents.handle`                     | ⭐⭐  |
+| pydantic-settings 配置管理            | 工程化基础                              | `app/config/settings.py`                                           | ⭐   |
 
 ## 2. 重点亮点与学习顺序（先看这个）
 

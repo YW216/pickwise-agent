@@ -1,0 +1,16 @@
+ALL I FILES: git-objects=1055  git-other=105  non-git=6677  |  R present=7837 R missing=0
+--- 09-16 12:10~12:14 batch ---
+count = 962
+git-objects=955 git-other=7 non-git=0 | R present=962
+$I01N6DI | size=4439 | objects/a2/c7bbb60f9021b5f7a53a3fd558b39acf06fbce?
+$I02LNKK | size=190 | .git/objects/1e?
+$I03GS0N | size=127 | objects/13/bf253a06516436bf48473b77877f9ebfbb5ab5?
+$I03SR7C | size=7408 | objects/c8/c78a233e7b5e2bbfc00d61d86da8a2729c0db7?
+$I05HUTR | size=107 | objects/19/27d1f82f64c51273bcb9961fb70bb9316c4029?
+$I05VJII | size=53 | objects/86/011eb5fc5571621153081f0ff72a1f3297ed52?
+$I074H62 | size=48 | objects/4c/81e1392c46710131f1ee26645a165a1d8b5b81?
+$I07MXAX | size=2293 | objects/ae/97098edf711fbbe31da696e0f3754bd5c4d38c?
+$I07QU5N | size=3312 | .git/objects/50?
+$I08NOUH | size=10680 | .git/objects/29?
+--- objects subdir distribution (all I) ---
+done

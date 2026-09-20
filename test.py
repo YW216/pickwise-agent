@@ -26,12 +26,29 @@ tools=[
                 }
             }
         }
-    }
+    },
+    {
+        "id": "ecom_buy",
+        "type": "function",
+        "function": {
+            "name": "ecom_buy",
+            "description": "购买商品",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "要购买的商品名称"
+                    }
+                }
+            }
+        }
+    },
 ]
 
 message={
     "role": "user",
-    "content": "搜索一个商品，商品名称为：商品A"
+    "content": "搜索一个商品，商品名称为：商品A，同时购买一个商品，商品名称为：商品B"
 }
 messages=[message]
 
@@ -45,10 +62,10 @@ for i in range(10):
     )
     assistant_msg = response.choices[0].message
     print(f"第{i}次请求结果：")
-    print("response:", response)
+    #print("response:", response)
     print("response.choices[0]:", response.choices[0])
     print("response.choices[0].message:", assistant_msg)
-    print("response.choices[0].message.content:", assistant_msg.content)
+    #print(f"模型思考:{assistant_msg.reasoning_content},模型回复:{assistant_msg.content}")
 
     if assistant_msg.tool_calls==None:
         print("结果：", assistant_msg.content)
@@ -77,6 +94,8 @@ for i in range(10):
         func_args = json.loads(tc.function.arguments)
         if func_name == "ecom_search":
             result = {"found": True, "name": func_args.get("query"), "price": "99.9 元", "stock": 10}
+        elif func_name == "ecom_buy":
+            result = {"success": True, "name": func_args.get("query")}
         else:
             result = {"error": f"未知工具 {func_name}"}
         result_str = json.dumps(result, ensure_ascii=False)
