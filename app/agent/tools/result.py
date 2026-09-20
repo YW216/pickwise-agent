@@ -1,6 +1,7 @@
 """工具统一返回信封（PickWise）。
 
-所有工具返回同一结构，失败路径统一：
+所有工具返回**同一个 dict 结构**——`ok()`/`fail()` 直接产出 dict，不包 dataclass：
+信封最终要 `json.dumps` 进 tool 消息，中间夹一层类只是白转一次。失败路径统一：
 
 - ``ok(data)``   —— 成功：success=True，data 放业务数据
 - ``fail(msg)``  —— 失败：success=False，error 放**纯人话**文案
@@ -13,29 +14,12 @@
    供开发者排查（并在终端 print）。
 3. 流向：模型看序列化后的 JSON 文本（tool 消息 content），
    程序看对象（result["data"]），评估看插桩记录。
+4. 唯一例外：执行器层（registry.execute_tool）在参数被归一化或夹紧时，为信封
+   追加 notice 字段（人话提示）。它描述"这次调用的参数被调整过"，不属于业务
+   数据故不进 data——ok()/fail() 本身不产生该字段。
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
-
-
-@dataclass
-class ToolResult:
-    """工具返回结果的统一信封。
-
-    属性说明：
-    - success：是否成功
-    - error：失败原因（纯人话；success=True 时为 None）
-    - data：业务数据（成功时放业务字段；失败时通常为空 dict）
-    """
-
-    success: bool
-    error: Optional[str] = None
-    data: dict = field(default_factory=dict)
-
-    def to_dict(self) -> dict:
-        """转成可直接序列化进 tool 消息的 dict。"""
-        return {"success": self.success, "error": self.error, "data": self.data}
+from typing import Optional
 
 
 def ok(data: dict) -> dict:

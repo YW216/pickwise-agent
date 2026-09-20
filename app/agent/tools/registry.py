@@ -1,13 +1,16 @@
 """工具注册表：OpenAI function calling schema + 分发执行（PickWise）。
 
 结构仿 ecom：
-- TOOL_DEFINITIONS：给模型看的工具说明书（手写 OpenAI function schema）
+- TOOL_DEFINITIONS：给模型看的工具说明书（手写 OpenAI function schema，兼作校验规则源）
 - _TOOL_MAP       ：工具名 → 业务函数
-- execute_tool    ：统一分发 + 执行器层兜底（第二层防御）
+- _SCHEMA_MAP     ：工具名 → parameters（校验闸门的规则源，从上一项派生）
+- execute_tool    ：统一分发 + 契约校验 + 异常兜底
 
-错误识别：
-- 工具函数内（第一层）负责业务失败的人话文案（"商品不存在"）
-- execute_tool（第二层）兜底未知异常：终端 print 排查 + 返回拼异常的 error
+错误处理（前两处是"闸门"——拒绝执行并把原因回喂模型，第三处是兜底）：
+1. 工具函数内：业务失败的人话文案（如"商品不存在"）
+2. validation 契约校验：参数不合签名 → 不执行，返回可操作原因（模型改值重调）；
+   被归一化或夹紧时给信封追加 notice——削过的结果必须让模型知道
+3. 异常兜底：漏网异常 → print 排查 + 拼异常的 error
 
 schema 编写约定：
 
@@ -21,6 +24,12 @@ schema 编写约定：
    路由规则统一写在 app/prompts/agents.py 各 Agent 的「工具使用原则」里。
 
 3. 取值固定的参数用 enum 表达，既省字数又带一层值域约束。
+
+4. 约束关键字（type / enum / required / minimum / maximum / minItems /
+   maxItems）是**双用**的：模型看它一次给对，执行层（validation 模块）反读它
+   做闸门——规则只有这一份，不另建校验表，避免"说明书改了、闸门忘改"。
+   例外：**不写 additionalProperties**。校验器默认过滤未知参数并回传提示，
+   比每条 schema 挂着 additionalProperties: false 更省每轮重发的 token。
 """
 
 import json
@@ -33,6 +42,7 @@ from app.agent.tools.knowledge import retrieve_knowledge
 from app.agent.tools.memory_tool import recall_user_memory
 from app.agent.tools.search_products import search_products
 from app.agent.tools.skill_tool import load_skill
+from app.agent.tools.validation import ArgumentError, validate_arguments
 
 # 工具名 → 业务函数。
 # 所有工具函数签名均为 (参数...) -> dict（返回统一信封），
@@ -86,10 +96,13 @@ TOOL_DEFINITIONS: list[dict] = [
                     "budget_max": {
                         "type": "number",
                         "description": "预算上限（元）",
+                        "minimum": 0,
                     },
                     "limit": {
                         "type": "integer",
                         "description": "返回条数，默认 10",
+                        "minimum": 1,
+                        "maximum": 20,
                     },
                 },
                 "required": [],
@@ -112,6 +125,8 @@ TOOL_DEFINITIONS: list[dict] = [
                     "limit": {
                         "type": "integer",
                         "description": "返回条数，默认 20",
+                        "minimum": 1,
+                        "maximum": 50,
                     },
                 },
                 "required": [],
@@ -138,6 +153,7 @@ TOOL_DEFINITIONS: list[dict] = [
                             "自然语言描述的购物需求，如「适合打游戏的轻薄本」"
                             "「通勤戴的安静耳机」，或直接给型号「凌霄 Pro 14」"
                         ),
+                        "minLength": 1,
                     },
                     "category": {
                         "type": "string",
@@ -147,10 +163,13 @@ TOOL_DEFINITIONS: list[dict] = [
                     "max_price": {
                         "type": "integer",
                         "description": "预算上限（元），如 5000 表示只要 5000 元及以下的商品",
+                        "minimum": 0,
                     },
                     "limit": {
                         "type": "integer",
                         "description": "返回商品数上限，默认 5",
+                        "minimum": 1,
+                        "maximum": 20,
                     },
                 },
                 "required": ["query"],
@@ -168,6 +187,7 @@ TOOL_DEFINITIONS: list[dict] = [
                     "product_id": {
                         "type": "string",
                         "description": "商品 ID，如 LP-01",
+                        "minLength": 1,
                     },
                 },
                 "required": ["product_id"],
@@ -184,8 +204,10 @@ TOOL_DEFINITIONS: list[dict] = [
                 "properties": {
                     "product_ids": {
                         "type": "array",
-                        "items": {"type": "string"},
+                        "items": {"type": "string", "minLength": 1},
                         "description": "商品 ID 列表，2-4 个，如 ['LP-01','LP-02']",
+                        "minItems": 2,
+                        "maxItems": 4,
                     },
                 },
                 "required": ["product_ids"],
@@ -206,10 +228,13 @@ TOOL_DEFINITIONS: list[dict] = [
                     "query": {
                         "type": "string",
                         "description": "用用户原问题或一句中文描述知识点",
+                        "minLength": 1,
                     },
                     "top_k": {
                         "type": "integer",
                         "description": "返回片段数，默认 3",
+                        "minimum": 1,
+                        "maximum": 10,
                     },
                 },
                 "required": ["query"],
@@ -230,6 +255,7 @@ TOOL_DEFINITIONS: list[dict] = [
                     "skill_name": {
                         "type": "string",
                         "description": "技能名，见系统提示中的可用技能目录",
+                        "minLength": 1,
                     },
                 },
                 "required": ["skill_name"],
@@ -259,21 +285,45 @@ TOOL_DEFINITIONS: list[dict] = [
 ]
 
 
-def execute_tool(name: str, arguments: dict) -> dict:
-    """根据工具名称分发执行，返回统一信封 dict。
+# 工具名 → parameters 块（校验闸门的规则源）。
+# 从 TOOL_DEFINITIONS 派生而非手写第二份，保证"给模型的说明书"与
+# "执行层的闸门"永远同源——schema 改一次，校验自动跟进。
+_SCHEMA_MAP: dict[str, dict] = {
+    definition["function"]["name"]: definition["function"]["parameters"]
+    for definition in TOOL_DEFINITIONS
+}
 
-    第二层防御：捕获任何未被工具函数处理的异常，
-    终端 print 供排查，返回拼异常的 error（纯人话优先由工具函数负责）。
+
+def execute_tool(name: str, arguments: dict) -> dict:
+    """根据工具名称分发执行，返回统一信封 dict（执行层的唯一收口）。
+
+    参数不合契约直接拒绝执行，返回可操作原因（模型改值重调）；
+    漏网异常在此兜底；参数被归一化或夹紧时给信封追加 notice。
     """
     func = _TOOL_MAP.get(name)
     if not func:
         return {"success": False, "error": f"未知工具: {name}", "data": {}}
+    if not isinstance(arguments, dict):
+        return {"success": False, "error": "工具参数必须是 JSON 对象", "data": {}}
+
+    notes: list[str] = []
+    schema = _SCHEMA_MAP.get(name)
+    if schema:
+        try:
+            arguments, notes = validate_arguments(schema, arguments)
+        except ArgumentError as exc:
+            #验证参数失败，返回错误信息
+            return {"success": False, "error": str(exc), "data": {}}
 
     try:
-        return func(**arguments)
+        result = func(**arguments)
     except Exception as e:
         print(f"[工具异常] {name}: {e}")
         return {"success": False, "error": f"工具执行出错: {e}", "data": {}}
+
+    if notes:
+        result = {**result, "notice": "；".join(notes)}
+    return result
 
 
 def to_tool_message_content(result: dict) -> str:

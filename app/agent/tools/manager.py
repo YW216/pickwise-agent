@@ -7,7 +7,9 @@ MCP 后续接入时在此扩展 `_init_mcp`；`use_mcp` 参数保留占位，
 职责：
 - 加载本地工具定义（registry.TOOL_DEFINITIONS）
 - 按白名单过滤工具（子 Agent 工具隔离）
-- 提供统一的 tool_definitions（给模型）与 execute_tool（执行）
+- 提供统一的 tool_definitions（给模型）与工具执行入口：
+  - execute_call_as_message：Agent 循环用——受理模型给的原始 arguments 字符串
+  - execute_tool / execute_tool_as_message：程序侧按名调用（已解析的参数）
 """
 
 from typing import Optional
@@ -15,6 +17,8 @@ from typing import Optional
 from app.agent.tools.registry import TOOL_DEFINITIONS as LOCAL_TOOL_DEFINITIONS
 from app.agent.tools.registry import execute_tool as local_execute_tool
 from app.agent.tools.registry import to_tool_message_content
+from app.agent.tools.result import fail
+from app.agent.tools.validation import parse_tool_arguments
 
 
 class ToolManager:
@@ -81,6 +85,18 @@ class ToolManager:
     def execute_tool_as_message(self, name: str, arguments: dict) -> str:
         """执行工具并把结果序列化为 tool 消息的 content 字符串。"""
         return to_tool_message_content(self.execute_tool(name, arguments))
+
+    def execute_call_as_message(self, name: str, raw_arguments: str) -> str:
+        """受理模型给的一次调用：原始 arguments → tool 消息 content。
+
+        Agent 循环的唯一工具入口，两道闸门的先后在此体现：先协议层解析
+        （坏 JSON → 回喂让模型重发），再走 execute_tool 的契约层校验与执行
+        （不合签名 → 回喂让模型改值）。
+        """
+        arguments, error = parse_tool_arguments(raw_arguments)
+        if error:
+            return to_tool_message_content(fail(error))
+        return self.execute_tool_as_message(name, arguments)
 
     def close(self):
         """清理资源（MCP 接入后用于关闭连接）。"""

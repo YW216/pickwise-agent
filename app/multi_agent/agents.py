@@ -3,8 +3,6 @@
 SubAgent 封装了一个轻量级 ReAct 循环，由 Orchestrator 调度执行。
 """
 
-import json
-
 from openai import OpenAI
 
 from app.agent.context_budget import (
@@ -132,15 +130,13 @@ class SubAgent:
             working.append(msg_dict)
 
             for tc in assistant_msg.tool_calls:
-                func_name = tc.function.name
-                func_args = json.loads(tc.function.arguments)
-
-                self._print_action(func_name, func_args)
-                # bug #4 修复：execute_tool 返回 dict，直接塞进 tool 消息 content
-                # 违反 OpenAI 协议（要求 str）；统一走信封序列化
-                result_str = self.tool_manager.execute_tool_as_message(
-                    func_name, func_args,
-                )
+                # 解析 → 校验 → 执行 → 序列化收口在 ToolManager（两道闸门见其方法说明）。
+                # 参数用模型给的原始文本打印：连"参数是坏 JSON"这种情形也能如实显示。
+                result_str = self.tool_manager.execute_call_as_message(
+                    tc.function.name, tc.function.arguments,
+                )  #包含校验和执行工具
+                
+                self._print_action(tc.function.name, tc.function.arguments)
                 self._print_observation(result_str)
 
                 tool_msg = {
@@ -189,9 +185,9 @@ class SubAgent:
     def _print_thought(self, text: str) -> None:
         print(f"\n  💭 [{self.name}·思考] {text}")
 
-    def _print_action(self, func_name: str, func_args: dict) -> None:
-        args_str = ", ".join(f"{k}={v!r}" for k, v in func_args.items())
-        print(f"  🔧 [{self.name}·调用工具] {func_name}({args_str})")
+    def _print_action(self, func_name: str, raw_arguments: str) -> None:
+        """打印工具调用：参数直接用模型给的原始文本（坏 JSON 时也能如实显示）。"""
+        print(f"  🔧 [{self.name}·调用工具] {func_name}({raw_arguments})")
 
     def _print_observation(self, result: str) -> None:
         display = result if len(result) <= 300 else result[:300] + "..."
