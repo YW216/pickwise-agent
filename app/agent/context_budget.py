@@ -49,26 +49,38 @@ def estimate_tool_definitions_tokens(tool_definitions: list[dict]) -> int:
 
 
 def tool_result_view(content: str, max_chars: int) -> str:
-    """超限结果转为明确标注的 JSON 预览，全文由调用方留在 transcript 中。"""
+    """超限结果转为明确标注的 JSON 预览，全文由调用方留在 transcript 中。
+
+    预算分配：头尾各占 7/16，余下 1/8 留给 JSON 骨架与字符串转义膨胀——head/tail
+    里的引号会被转义成 \\" ，实际比原文更长。若内容引号过于密集导致仍超限，
+    逐步回缩；**硬约束是 len(view) <= max_chars**。
+
+    字符计数按**原文口径**给出：`shown_chars = len(head) + len(tail)`，
+    `omitted_chars = original_chars - shown_chars`（都不含 JSON 骨架与转义），
+    所以 `shown + omitted` 恒等于 `original_chars`——模型据此就能判断缺了多少，
+    不必自己从原文长度里减。
+    """
     if max_chars < 256:
         raise ValueError("工具结果预览上限不能小于 256 字符")
     if len(content) <= max_chars:
         return content
-    preview_chars = (max_chars - 200) // 12  # 200 字符预留给截断标注 JSON 骨架（函数保证 max_chars >= 256，结果恒为正）
-    payload = {
-        "truncated": True,
-        "original_chars": len(content),
-        "notice": "工具结果已截断，请缩小查询范围后重查；不可推断省略部分。",
-        "head": content[:preview_chars],
-        "tail": content[-preview_chars:] if preview_chars else "",
-    }
-    return json.dumps(payload, ensure_ascii=False)
 
-
-def prepare_messages(messages: list[dict], tool_result_max_chars: int) -> list[dict]:
-    """构建私有请求视图，历史与本轮工具结果使用相同的长度限制。"""
-    return [
-        {**message, "content": tool_result_view(message.get("content") or "", tool_result_max_chars)}
-        if message.get("role") == "tool" else dict(message)
-        for message in messages
-    ]
+    preview_chars = (max_chars - max_chars // 8) // 2
+    while True:
+        head = content[:preview_chars]
+        tail = content[-preview_chars:] if preview_chars else ""
+        view = json.dumps(
+            {
+                "truncated": True,
+                "original_chars": len(content),
+                "shown_chars": len(head) + len(tail),
+                "omitted_chars": len(content) - len(head) - len(tail),
+                "notice": "工具结果已截断，请缩小查询范围后重查；不可推断省略部分。",
+                "head": head,
+                "tail": tail,
+            },
+            ensure_ascii=False,
+        )
+        if len(view) <= max_chars or preview_chars == 0:
+            return view
+        preview_chars = preview_chars * 4 // 5  # 回缩 20%，避免一次砍太狠

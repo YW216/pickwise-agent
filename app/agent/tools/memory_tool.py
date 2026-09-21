@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.agent.tools.result import fail, ok
+
 if TYPE_CHECKING:
     from app.agent.memory.manager import MemoryManager
 
@@ -19,20 +21,17 @@ def set_memory_manager(manager: MemoryManager) -> None:
 def recall_user_memory(query: str = "") -> dict:
     """查询当前用户的记忆信息（长期记忆和短期记忆）。"""
     if _memory_manager is None or not _memory_manager.memory_enabled:
-        return {"success": False, "error": "记忆系统未启用"}
+        return fail("记忆系统未启用")
 
-    result: dict = {
-        "success": True,
+    payload: dict = {
         "short_term_facts": _memory_manager.stm.facts,
         "long_term_facts": [
             {"content": f.content, "category": f.category}
             for f in _memory_manager.ltm.facts
         ],
     }
-
     if _memory_manager.ltm.interaction_summaries:
-        result["recent_interactions"] = [
+        payload["recent_interactions"] = [
             s["summary"] for s in _memory_manager.ltm.interaction_summaries[-3:]
         ]
-
-    return result
+    return ok(payload)

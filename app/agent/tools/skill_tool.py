@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.agent.tools.result import fail
+
 if TYPE_CHECKING:
     from app.agent.skills.loader import SkillManager
 
@@ -23,5 +25,5 @@ def set_skill_manager(manager: SkillManager) -> None:
 def load_skill(skill_name: str) -> dict:
     """加载指定技能的完整指令。Agent 调用后按指令处理用户问题。"""
     if _skill_manager is None:
-        return {"success": False, "error": "技能系统未启用"}
+        return fail("技能系统未启用")
     return _skill_manager.load_skill(skill_name)

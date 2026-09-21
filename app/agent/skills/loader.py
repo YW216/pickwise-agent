@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.agent.tools.result import fail, ok
+
 
 @dataclass
 class SkillMeta:
@@ -163,19 +165,12 @@ class SkillManager:
     def load_skill(self, skill_name: str) -> dict:
         """加载指定 skill 的完整指令。供 load_skill 工具调用。"""
         if not self.enabled:
-            return {"success": False, "error": "技能系统未启用"}
+            return fail("技能系统未启用")
 
         skill = self._skills.get(skill_name)
         if not skill:
             available = ", ".join(self._skills.keys()) or "无"
-            return {
-                "success": False,
-                "error": f"未找到技能「{skill_name}」，可用技能：{available}",
-            }
+            return fail(f"未找到技能「{skill_name}」，可用技能：{available}")
 
         body = skill.load_body()
-        return {
-            "success": True,
-            "skill_name": skill.name,
-            "instructions": body,
-        }
+        return ok({"skill_name": skill.name, "instructions": body})

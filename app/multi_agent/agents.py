@@ -10,7 +10,6 @@ from app.agent.context_budget import (
     estimate_messages_tokens,
     estimate_tool_definitions_tokens,
     is_context_overflow,
-    prepare_messages,
     tool_result_view,
 )
 from app.agent.tools.manager import ToolManager
@@ -84,7 +83,14 @@ class SubAgent:
         最后一条恒为最终答复的 assistant 消息（设计文档 10.5 位置约定）。
         """
         new_messages: list[dict] = []
-        working = prepare_messages(messages, self.tool_result_max_chars)
+        # 私有副本（Copy-on-Write，绝不触碰 Orchestrator 的 raw_messages）：
+        # ① 新建 list——handle 内部会 append，不能改到调用方传来的列表；
+        # ② 每条再浅拷贝一层——防止将来有人就地改写元素时污染上游。
+        # 注：tool 消息在入库时已是视图，这里不做任何截断。
+        working = [dict(message) for message in messages]
+        # 本轮各工具签名的调用次数（熔断用）。生命周期 = 一次 handle，所以跨轮
+        # 不会误伤——用户下一轮问同样的问题，仍然照常执行。
+        seen: dict[str, int] = {}
 
         for i in range(max_steps):
             print(f"第 {i+1} 步·[{self.name}]")
@@ -130,28 +136,28 @@ class SubAgent:
             working.append(msg_dict)
 
             for tc in assistant_msg.tool_calls:
-                # 解析 → 校验 → 执行 → 序列化收口在 ToolManager（两道闸门见其方法说明）。
-                # 参数用模型给的原始文本打印：连"参数是坏 JSON"这种情形也能如实显示。
+                # 解析 → 校验 → 熔断 → 执行 → 序列化，全部收口在 ToolManager
+                # （三道闸门见其方法说明）。参数用模型给的原始文本打印：
+                # 连"参数是坏 JSON"这种情形也能如实显示。
                 result_str = self.tool_manager.execute_call_as_message(
-                    tc.function.name, tc.function.arguments,
-                )  #包含校验和执行工具
+                    tc.function.name, tc.function.arguments, seen,
+                )
                 
                 self._print_action(tc.function.name, tc.function.arguments)
                 self._print_observation(result_str)
 
+                # 入库即截断：存下来的就是模型看到的（单一真相）。
+                # 不再"全量入账 + 发送前另做一份视图"，两者也就不会再漂移。
                 tool_msg = {
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result_str,
-                }
-                new_messages.append(tool_msg)
-                working.append({
-                    **tool_msg,
                     "content": tool_result_view(
                         result_str, self.tool_result_max_chars,
                     ),
-                })
-# test
+                }
+                new_messages.append(tool_msg)
+                working.append(tool_msg)
+
         # 兜底策略：超过最大步数时不给工具，让模型基于已有观察给出最终回答
         try:
             response = self._complete(working, [])

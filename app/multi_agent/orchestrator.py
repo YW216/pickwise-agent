@@ -22,7 +22,6 @@ from app.agent.context_budget import (
     estimate_messages_tokens,
     estimate_tool_definitions_tokens,
     is_context_overflow,
-    prepare_messages,
 )
 from app.agent.product_tracker import format_products_block, merge_products
 from app.config.settings import settings
@@ -308,7 +307,6 @@ class MultiAgentOrchestrator:
             agent_pack = replace(pack, skill_catalog=self._skill_catalog_for(key))
             for mode in ("single", "multi"):
                 messages = build_working_messages(agent_pack, cfg, mode)
-                messages = prepare_messages(messages, self.tool_result_max_chars)
                 tool_defs = self.agents[key].tool_manager.tool_definitions
                 estimates.append(
                     estimate_messages_tokens(messages)

@@ -40,6 +40,7 @@ from app.agent.tools.detail import compare_products, get_detail
 from app.agent.tools.favorites import get_user_favorites
 from app.agent.tools.knowledge import retrieve_knowledge
 from app.agent.tools.memory_tool import recall_user_memory
+from app.agent.tools.result import fail
 from app.agent.tools.search_products import search_products
 from app.agent.tools.skill_tool import load_skill
 from app.agent.tools.validation import ArgumentError, validate_arguments
@@ -294,17 +295,34 @@ _SCHEMA_MAP: dict[str, dict] = {
 }
 
 
-def execute_tool(name: str, arguments: dict) -> dict:
+# 同一签名的最大执行次数：第 3 次调用拦下。2 次里已含一次重试机会，因此不区分
+# 成败（不设 retryable 字段）——规则只有"执行前计数，超上限即拒"这一条。
+MAX_SAME_CALLS = 2
+
+
+def _signature(name: str, arguments: dict) -> str:
+    """调用签名 = 工具名 + 归一化参数的稳定序列化（键序无关）。
+
+    只在参数通过契约校验之后调用，所以 `"10"` 与 `10` 是同一个签名——
+    否则模型换个写法就绕过了熔断。
+    """
+    return f"{name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"
+
+
+def execute_tool(
+    name: str, arguments: dict, seen: dict[str, int] | None = None,
+) -> dict:
     """根据工具名称分发执行，返回统一信封 dict（执行层的唯一收口）。
 
     参数不合契约直接拒绝执行，返回可操作原因（模型改值重调）；
+    同一签名本轮内超过 MAX_SAME_CALLS 次则熔断（`seen` 为 None 时不熔断）；
     漏网异常在此兜底；参数被归一化或夹紧时给信封追加 notice。
     """
     func = _TOOL_MAP.get(name)
     if not func:
-        return {"success": False, "error": f"未知工具: {name}", "data": {}}
+        return fail(f"未知工具: {name}")
     if not isinstance(arguments, dict):
-        return {"success": False, "error": "工具参数必须是 JSON 对象", "data": {}}
+        return fail("工具参数必须是 JSON 对象")
 
     notes: list[str] = []
     schema = _SCHEMA_MAP.get(name)
@@ -312,14 +330,27 @@ def execute_tool(name: str, arguments: dict) -> dict:
         try:
             arguments, notes = validate_arguments(schema, arguments)
         except ArgumentError as exc:
-            #验证参数失败，返回错误信息
-            return {"success": False, "error": str(exc), "data": {}}
+            return fail(str(exc))
+
+    # 熔断闸门：签名建在归一化后的参数上；拦下的那次不计入计数，
+    # 因此到上限后每一次同签名调用都会被拦（不会"拦一次又放行"）
+    if seen is not None:
+        signature = _signature(name, arguments)
+        if seen.get(signature, 0) >= MAX_SAME_CALLS:
+            shown = signature if len(signature) <= 120 else signature[:117] + "..."
+            print(f"[熔断] {shown} 本轮第 {MAX_SAME_CALLS + 1} 次，已拦下")
+            return fail(
+                f"本轮已用相同参数调用 {shown} 两次，请查看前面的工具消息"
+                "（结果或失败原因都在那里），不要重复调用：换查询条件、换工具，"
+                "或基于现有信息作答。"
+            )
+        seen[signature] = seen.get(signature, 0) + 1
 
     try:
         result = func(**arguments)
     except Exception as e:
         print(f"[工具异常] {name}: {e}")
-        return {"success": False, "error": f"工具执行出错: {e}", "data": {}}
+        return fail(f"工具执行出错: {e}")
 
     if notes:
         result = {**result, "notice": "；".join(notes)}
