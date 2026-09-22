@@ -609,7 +609,7 @@ def s5_end_to_end_smoke():
 
     from app.db.snapshot import PRODUCTS
 
-    mentioned_ids = set(re.findall(r"\b(?:LP|PH|HP)-\d{2}\b", reply))
+    mentioned_ids = set(re.findall(r"(?<![A-Za-z0-9])(?:LP|PH|HP)-\d{2}(?!\d)", reply))
     valid_ids = set(PRODUCTS)
     bad = mentioned_ids - valid_ids
     if not bad:

@@ -113,6 +113,14 @@ def test_rule_price_checks():
     ( _ok if not r.applicable else _fail)("未声明的断言跳过计分")
 
 
+def test_id_pattern_matches_id_adjacent_to_chinese():
+    """回复里的商品 ID 紧贴中文时也要能提取（单词边界在中文旁不成立）。"""
+    assert metrics._ID_PATTERN.findall("推荐LP-01这款") == ["LP-01"]
+    assert metrics._ID_PATTERN.findall("价格LP-03为5999") == ["LP-03"]
+    assert metrics._ID_PATTERN.findall("推荐 LP-05 这款") == ["LP-05"]
+    assert metrics._ID_PATTERN.findall("XLP-01 和 LP-011") == []
+
+
 def test_rule_content_checks():
     print("\n[3/5] 内容与边界断言")
     # 关键词

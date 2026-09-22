@@ -218,6 +218,29 @@ def test_merge_products_extracts_from_tool_json_and_inherits_store():
     assert store == {"LP-01": {"product_id": "LP-01", "name": "星海凌霄", "price_at_mention": 5999}}
 
 
+def test_merge_products_matches_id_adjacent_to_chinese():
+    """中文紧贴的商品 ID 必须能登记（单词边界在中文旁不成立，已改否定环视）。"""
+    messages = [
+        {"role": "assistant", "content": "推荐LP-01这款；价格LP-03为5999"},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "t1", "type": "function",
+             "function": {"name": "get_detail", "arguments": '{"product_id":"LP-05"}'}},
+        ]},
+    ]
+
+    merged = merge_products({}, messages)
+
+    assert set(merged) == {"LP-01", "LP-03", "LP-05"}
+    assert all(merged[pid] == {"product_id": pid} for pid in merged)  # 文本来源只登记壳子
+
+
+def test_merge_products_ignores_fused_tokens():
+    """XLP-01 / LP-011 不是独立编号，不得登记。"""
+    messages = [{"role": "assistant", "content": "XLP-01、LP-011 无效，LP-05 有效"}]
+
+    assert set(merge_products({}, messages)) == {"LP-05"}
+
+
 def test_format_products_block():
     products = {"LP-01": {"product_id": "LP-01", "name": "星海凌霄", "price_at_mention": 5999}}
 

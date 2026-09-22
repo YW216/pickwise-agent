@@ -1,6 +1,11 @@
-﻿=== pytest full ===
-....................F................................................... [ 96%]
-...                                                                      [100%]
+﻿=== A) new/affected tests ===
+.............                                                            [100%]
+13 passed in 5.02s
+
+exitA=0
+=== B) full suite ===
+.......................F................................................ [ 92%]
+......                                                                   [100%]
 ================================== FAILURES ===================================
 __________________________ test_rule_content_checks ___________________________
 
@@ -80,7 +85,7 @@ __________________________ test_rule_content_checks ___________________________
 >       non_catalog_price = max(p["price"] for p in PRODUCTS.values()) + 1
 E       ValueError: max() arg is an empty sequence
 
-tests\test_evaluation.py:189: ValueError
+tests\test_evaluation.py:197: ValueError
 ---------------------------- Captured stdout call -----------------------------
 
 [3/5] 鍐呭涓庤竟鐣屾柇瑷€
@@ -100,10 +105,10 @@ tests\test_evaluation.py:189: ValueError
   鉁?棰勭畻鍥炴樉涓嶈鎶? 鎻愬強鐨勪环鏍煎潎鐪熷疄
 =========================== short test summary info ===========================
 FAILED tests/test_evaluation.py::test_rule_content_checks - ValueError: max()...
-1 failed, 74 passed in 83.93s (0:01:23)
+1 failed, 77 passed in 84.39s (0:01:24)
 
-pytest_exit=1
-=== manual runner A1+A2 ===
+exitB=1
+=== C) manual runner A1+A2 ===
 [snapshot] 鈿狅笍 鐪熷€煎眰鍔犺浇澶辫触锛屽晢鍝佺洰褰曟湇鍔′笉鍙敤: OperationalError: connection failed: connection to server at "127.0.0.1", port 15432 failed: could not receive data from server: Socket is not connected (0x00002749/10057)
 could not send SSL negotiation packet: Socket is not connected (0x00002749/10057)
 
@@ -116,4 +121,4 @@ could not send SSL negotiation packet: Socket is not connected (0x00002749/10057
   鉁?8 鏉¤В鏋愮敤渚嬪叏杩囷紙澶у皬鍐?涓枃閫楀彿/鍥哄畾椤哄簭/鍘婚噸/鍏滃簳锛?
   鉁?max_tokens=2048锛堟帹鐞嗘ā鍨嬫€濊€冮绠楋紱2026-09-16 鐢?512 涓婅皟锛?
 
-manual_exit=0
+exitC=0

@@ -45,7 +45,9 @@ _CATEGORY_PRICES: dict[str, set[int]] = {}
 for _p in _PRODUCT_BY_ID.values():
     _CATEGORY_PRICES.setdefault(_p["category"], set()).add(_p["price"])
 
-_ID_PATTERN = re.compile(r"\b(?:LP|PH|HP)-\d{2}\b")
+# 边界用否定环视而非 \b：中文与 ID 相邻时 \b 不成立（\w 含中文），会漏检，
+# 使数值保真 / 幻觉断言静默放宽。与 product_tracker._PRODUCT_ID_PATTERN 语义一致。
+_ID_PATTERN = re.compile(r"(?<![A-Za-z0-9])(?:LP|PH|HP)-\d{2}(?!\d)")
 # 价格形如 ¥5180 / 5180 元（要求货币标记，避免把"16GB""14寸"这类规格数字误当价格）
 _PRICE_PATTERN = re.compile(r"[¥￥]\s*(\d{3,6})|(\d{3,6})\s*元")
 

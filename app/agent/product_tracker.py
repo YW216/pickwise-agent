@@ -19,7 +19,10 @@ import json
 import re
 from typing import Any
 
-_PRODUCT_ID_PATTERN = re.compile(r"\b(?:LP|PH|HP)-\d+\b")
+# 边界用否定环视而非 \b：Python re 的 \w 在 Unicode 下含中文，
+# "推荐LP-01这款" 里中文与 L 之间不存在单词边界 → \b 会漏匹配。
+# ID 固定两位数字（与 metrics._ID_PATTERN 语义一致），(?!\d) 防 LP-011 被切一半。
+_PRODUCT_ID_PATTERN = re.compile(r"(?<![A-Za-z0-9])(?:LP|PH|HP)-\d{2}(?!\d)")
 
 
 def _record_product(products: dict, value: dict) -> None:

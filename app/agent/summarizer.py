@@ -67,6 +67,11 @@ def summarize(
         model=model,
         temperature=0.3,
         messages=messages,
+        # 推理模型的思考与正文共享 max_tokens：不指定强度时走服务端默认（偏高），
+        # 思考会把 summary_max_tokens 吃光 → finish_reason='length' → 下面的检查
+        # 直接判失败，压缩永远做不成（与 router 2026-09-16 的坑同根因）。
+        # 摘要是填表式的短输出，固定低强度即可，不随 settings.reasoning_effort 变化。
+        reasoning_effort="low",
         **kwargs,
     )
     choice = response.choices[0]
