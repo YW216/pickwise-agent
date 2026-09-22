@@ -50,7 +50,6 @@ class SubAgent:
     def __init__(
         self,
         name: str,
-        system_prompt: str,
         tool_manager: ToolManager,
         client: OpenAI,
         model: str,
@@ -61,7 +60,6 @@ class SubAgent:
         reasoning_effort: str = "",
     ):
         self.name = name
-        self.system_prompt = system_prompt
         self.tool_manager = tool_manager
         self.client = client
         self.model = model

@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     temperature: float = 0.7
     # 思考强度（DeepSeek V4 思考模式参数，透传 API 的 reasoning_effort）：
     # low=轻思考 / high=日常开发推荐 / max=官方对 Agent 场景的建议档。
-    # 仅作用于子 Agent 与 Result 的生成调用；Router（轻量分类，max_tokens=512）
-    # 不传——思考会与正文共享输出预算，深思考会把路由正文挤空（P1 5.1 教训）。
+    # 仅作用于子 Agent 与 Result 的生成调用；Router 不受此配置影响——它是轻量
+    # 分类任务，在 router.py 中固定 low + max_tokens=2048（取值理由见该处注释）。
     # 空串 = 不传该参数（用服务端默认行为）。
     reasoning_effort: str = "high"
 

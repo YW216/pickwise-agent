@@ -4,8 +4,8 @@
 与 test_p1/p2/p3（分阶段载体）互补，本文件是**整体架构验收**：
 
 一、架构验收（多数 mock，不真调 LLM）
-  A1 白名单隔离（4/8/3）+ 6 份 prompt 一致性（#1/#2）
-  A2 Router 多值解析 + max_tokens=512（#3）
+  A1 白名单隔离（8/3）+ 4 份 prompt 一致性（#1/#2）
+  A2 Router 多值解析 + max_tokens=2048（#3）
   A3 单 Agent 路径：直返、无 Result、全量合并（#4）
   A4 多 Agent 路径：并行、黑板、固定顺序合并、tool 对完整（#5/#7/#8）
   A5 部分失败不整体失败（#9）
@@ -164,7 +164,7 @@ def a1_whitelist_and_prompts():
 
 
 def a2_router_parse():
-    print("\n[A2] Router 多值解析 + max_tokens=512（#3）")
+    print("\n[A2] Router 多值解析 + max_tokens=2048（#3）")
     from types import SimpleNamespace
 
     class _FakeClient:
@@ -200,10 +200,10 @@ def a2_router_parse():
 
     client = _FakeClient("presale")
     Router(client, "test-model").route("x")
-    if (client.last_kwargs or {}).get("max_tokens") == 512:
-        _ok("max_tokens=512（推理模型思考预算，5.3 修订）")
+    if (client.last_kwargs or {}).get("max_tokens") == 2048:
+        _ok("max_tokens=2048（推理模型思考预算；2026-09-16 由 512 上调）")
     else:
-        _fail("max_tokens != 512")
+        _fail("max_tokens != 2048")
 
 
 def a3_single_agent_path():

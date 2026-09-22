@@ -110,6 +110,3 @@ class ToolManager:
     def close(self):
         """清理资源（MCP 接入后用于关闭连接）。"""
         return None
-
-
-        #hello

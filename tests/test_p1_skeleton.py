@@ -63,14 +63,14 @@ def _fail(msg: str):
 
 # ---------- 验证 1：白名单隔离（十五节 #1） ----------
 def test_whitelist():
-    print("\n[1/4] 工具白名单隔离（售前 9 / 咨询 4）")
-    expected = {"presale": 9, "consult": 4}
+    print("\n[1/4] 工具白名单隔离（售前 8 / 咨询 3）")
+    expected = {"presale": 8, "consult": 3}
 
     for key, count in expected.items():
         names = set(AGENT_CONFIGS[key]["tools"])
         if len(names) != count:
             _fail(f"{key} 白名单数量 {len(names)} != {count}")
-    _ok("AGENT_CONFIGS 白名单数量 presale=9 / consult=4 正确")
+    _ok("AGENT_CONFIGS 白名单数量 presale=8 / consult=3 正确")
 
     orch = _fresh_orchestrator()
     for key in expected:
@@ -165,10 +165,10 @@ def test_router_parse():
     router = Router(client, "test-model")
     router.route("测试输入")
     mt = (client.last_kwargs or {}).get("max_tokens")
-    if mt == 512:
-        _ok("max_tokens=512 已生效（推理模型思考需预算，设计文档 5.3 v2.1 修订）")
+    if mt == 2048:
+        _ok("max_tokens=2048 已生效（推理模型思考需预算；2026-09-16 由 512 上调）")
     else:
-        _fail(f"max_tokens 应为 512，实际 {mt}")
+        _fail(f"max_tokens 应为 2048，实际 {mt}")
 
 
 # ---------- 验证 4：端到端 smoke（真调 LLM，单场景） ----------

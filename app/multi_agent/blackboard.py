@@ -20,7 +20,7 @@ from app.multi_agent.agents import AGENT_CONFIGS
 class BlackboardEntry:
     """单个 Agent 的执行回执。"""
 
-    agent: str                # guide / compare / consult
+    agent: str                # presale / consult
     status: str               # success / failed / overflow（overflow 仅编排器内部过渡态）
     error: str | None         # 失败或溢出原因（status != success 时有值）
     new_messages: list[dict]  # handle() 返回的本轮轨迹（思考/工具对/最终答复），

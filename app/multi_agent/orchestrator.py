@@ -65,7 +65,6 @@ class MultiAgentOrchestrator:
             )
             self.agents[key] = SubAgent(
                 name=cfg["name"],
-                system_prompt=cfg["prompts"]["single"],   # P1 过渡态：恒用 single，P3 起按场景数选择
                 tool_manager=tm,
                 client=self.client,
                 model=self.model,
