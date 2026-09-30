@@ -30,10 +30,16 @@ def search_candidates(
     """结构化过滤查询：品牌/型号字面 + 品类精确 + 价格上限。
 
     Returns:
-        {"candidates": [brief...], "total": N}
+        {"candidates": [brief...], "total": 返回条数, "matched": 符合条件总数}
+
+    total 与 matched 是两个不同口径（勿混用）：
+    - total   = len(candidates)，即「本次返回了几条」
+    - matched = COUNT(*) OVER()，即「符合条件共几条」（不受 LIMIT 影响）
+    只有 matched 才能让模型判断"结果是否被截断、要不要请用户补充条件"。
     """
     sql = """
-        SELECT product_id, name, brand, category, price, LEFT(introduction->>0, 64)
+        SELECT product_id, name, brand, category, price, LEFT(introduction->>0, 64),
+               COUNT(*) OVER() AS matched
         FROM products
         WHERE (%(cat)s::text IS NULL OR category = %(cat)s::text)
           AND (%(brand)s::text IS NULL OR brand = %(brand)s::text)
@@ -51,9 +57,11 @@ def search_candidates(
     candidates = [
         {"product_id": pid, "name": name, "brand": brand,
          "category": cat, "price": price, "summary": summary}
-        for pid, name, brand, cat, price, summary in rows
+        for pid, name, brand, cat, price, summary, _matched in rows
     ]
-    return {"candidates": candidates, "total": len(candidates)}
+    # COUNT(*) OVER() 在无匹配行时无值可取，故取不到时以返回条数兜底（此时两者必然相等：0）
+    matched = rows[0][6] if rows else len(candidates)
+    return {"candidates": candidates, "total": len(candidates), "matched": matched}
 
 
 def search_nearest(

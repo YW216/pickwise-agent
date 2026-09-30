@@ -14,7 +14,7 @@ from typing import Optional
 from openai import OpenAI
 
 from app.agent.context_budget import estimate_message_tokens, estimate_text_tokens
-from app.agent.summarizer import summarize
+from app.agent.summarizer import condense, summarize
 
 
 _SUMMARY_SECTIONS = (
@@ -97,6 +97,11 @@ def _validate_summary(summary: str) -> str:
     return summary
 
 
+def _over_limit(summary: str, max_tokens: int, max_chars: int) -> bool:
+    """摘要是否超出可接受长度（字符数或估算 token，任一越限即算）。"""
+    return len(summary) > max_chars or estimate_text_tokens(summary) > max_tokens
+
+
 def compact(
     messages: list[dict],
     summary: str | None,
@@ -104,8 +109,8 @@ def compact(
     model: str,
     keep_recent_tokens: int,
     end: Optional[int] = None,
-    summary_max_tokens: int = 2048,
-    summary_max_chars: int = 12000,
+    summary_max_tokens: int = 4096,
+    summary_max_chars: int = 3000,
     context_window: int = 200000,
     tool_result_max_chars: int = 12000,
 ) -> tuple[int, str | None]:
@@ -142,6 +147,25 @@ def compact(
         # 确定性失败（如输入超预算）在第二次调用中同样快速抛出，不放大成本。
         new_summary = generate()
 
-    if len(new_summary) > summary_max_chars or estimate_text_tokens(new_summary) > summary_max_tokens:
-        raise ValueError("压缩摘要超过长度上限")
+    if _over_limit(new_summary, summary_max_tokens, summary_max_chars):
+        # 摘要撞墙的补救：增量摘要只增不减，一旦越限就再也压不动（此后每轮压缩都
+        # 失败，上下文只涨不跌直至溢出）。这里不直接放弃，而是调一次 condense
+        # 让摘要压缩自己——宁可丢部分叙述性细节，也不能让压缩整体失效。
+        # 目标取上限的 2/3，给下次增长留空间，避免刚压完立刻又越限。
+        try:
+            new_summary = _validate_summary(
+                condense(
+                    client=client,
+                    model=model,
+                    summary=new_summary,
+                    target_chars=summary_max_chars * 2 // 3,
+                    context_window=context_window,
+                    max_tokens=summary_max_tokens,
+                ).strip()
+            )
+        except Exception as exc:
+            print(f"⚠️  [压缩] 摘要精简失败，放弃本次压缩: {exc}")
+        if _over_limit(new_summary, summary_max_tokens, summary_max_chars):
+            raise ValueError("压缩摘要超过长度上限")
+
     return cut, new_summary

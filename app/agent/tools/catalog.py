@@ -20,6 +20,14 @@ specs 参数值与介绍文案**不参与**本工具匹配——参数条件（�
 from app.agent.tools.result import fail, ok
 from app.config.settings import settings
 
+# 候选卡片的规模提示：模型看到候选清单时，据此判断"是否值得逐款拉详情"。
+# 刻意不叫 notice——notice 是执行器层（registry）在参数被归一化/夹紧时的专用字段，
+# 业务层占用会与那层语义冲突。此处描述"这批卡片够用/不够用"，属业务信息。
+_CARDS_HINT = (
+    "以上候选卡片已含名称/品牌/价格/定位，足以向用户展示可选范围。"
+    "不要为罗列清单而逐款查详情；仅当用户指名少数几款需要比对具体参数时才逐一查询。"
+)
+
 
 def brief_view(product: dict) -> dict:
     """候选精简视图（不含完整 specs）。
@@ -70,7 +78,7 @@ def search_catalog(
             res = search_candidates(settings.database_url, query, brand,
                                     category, budget_max, limit)
             if res["total"]:
-                return ok(res)
+                return ok({**res, "hint": _CARDS_HINT})
             near = search_nearest(settings.database_url, query, brand,
                                   category, budget_max, 3)
             if near["candidates"]:
@@ -86,4 +94,5 @@ def search_catalog(
             print(f"[search_catalog] 商品服务不可用: {type(exc).__name__}: {exc}")
             return fail("商品服务暂时不可用，请稍后再试", {"candidates": [], "total": 0})
 
-    return ok({"candidates": res["candidates"], "total": res["total"]})
+    # 未配置 database_url 时无数据源可用：显式失败，不引用未定义的 res
+    return fail("商品服务暂未配置，请稍后再试", {"candidates": [], "total": 0})

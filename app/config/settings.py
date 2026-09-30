@@ -79,9 +79,23 @@ class Settings(BaseSettings):
     reserve_tokens: int = Field(default=32768, gt=0)
     compaction_enabled: bool = True
     keep_recent_tokens: int = Field(default=8000, gt=0)
-    summary_max_tokens: int = Field(default=2048, gt=0)
-    summary_max_chars: int = Field(default=12000, gt=0)
+    # summary_max_tokens 身兼两职：摘要生成的 max_tokens（防 LLM 输出被截断），
+    # 以及摘要长度的 token 校验上限。2026-09-29 真调实测撞墙：第一次压缩生成的
+    # 摘要 1701 字（约 1560 token）已逼近 2048，第二次压缩必然超限失败，
+    # 此后摘要只增不减 → 永久压不动 → 上下文一路涨到溢出。提到 4096 留出空间。
+    summary_max_tokens: int = Field(default=4096, gt=0)
+    # 摘要长度的验收标准（字符数，人可读）。原值 12000 实际是死代码——token 校验
+    # （2048）恒先触发，它永远轮不到。降到 3000 让它成为真正的长度约束，
+    # 与 prompt 里"整体控制在 1500 字以内"的引导配合（留一倍余量）。
+    summary_max_chars: int = Field(default=3000, gt=0)
     tool_result_max_chars: int = Field(default=12000, ge=256)
+    # 单条用户输入的估算上限（入口体量闸门）。
+    # 必要性：当前 user 消息永远不在压缩范围内（_try_compact 的 active_user_index
+    # 把它排除在外），所以"输入本身超长"压缩救不了，必须在进入历史前拦下。
+    # 取值依据：触发线 167232、实测轮初 ≤30K、单轮增长 1~3K——16K 不影响正常提问
+    # （实测几十到几百 token），且留足 130K+ 余量。
+    # 注：入口的完整校验（prompt 注入等）另立专项，此处只做体量闸门。
+    max_user_input_tokens: int = Field(default=16000, gt=0)
 
     @model_validator(mode="after")
     def validate_context_budget(self):

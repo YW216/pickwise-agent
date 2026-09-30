@@ -1,7 +1,7 @@
 """P1 骨架验证：白名单隔离 / prompt-schema 一致性 / Router 多值解析 / 端到端 smoke。
 
 对应设计文档（develop_docs/模块/4-多Agent架构设计.md）十五节验证清单：
-- #1 白名单隔离（售前 9 / 咨询 3；售前调 retrieve_warranty 返回"未知工具"）
+- #1 白名单隔离（售前 8 / 咨询 3；售前调 retrieve_warranty 返回"未知工具"）
 - #2 prompt 声明工具 vs 白名单一致性
 - #3 Router 多值解析用例表（mock client，不真调 LLM）
 - #10 result_str 类型（tool 消息 content 全程为 str，bug #4 修复验证，随端到端检查）
@@ -201,6 +201,23 @@ def test_end_to_end_smoke():
     print(f"     回复：{reply[:120]}")
 
 
+# ---------- 验证 5：入口体量闸门（不真调 LLM） ----------
+def test_input_size_guard():
+    print("\n[5/5] 入口体量闸门（超长输入不入历史、不调 LLM）")
+    _clean()
+    orch = _fresh_orchestrator()
+    before = orch.history_size
+
+    # 中文字符估算约 1.5 token/字，构造远超上限的输入
+    over = "很长" * orch.max_user_input_tokens
+    reply = orch.chat(over)
+
+    if orch.history_size == before and "输入过长" in reply:
+        _ok(f"超长输入被拦下，历史未变（仍为 {before} 条）")
+    else:
+        _fail(f"闸门失效：history {before} → {orch.history_size}，reply={reply[:40]!r}")
+
+
 def main():
     print("=" * 60)
     print("  P1 骨架验证（多 Agent 设计 v2.1 · 十五节 #1/#2/#3/#10）")
@@ -210,6 +227,7 @@ def main():
         test_whitelist()
         test_prompt_schema_consistency()
         test_router_parse()
+        test_input_size_guard()
         test_end_to_end_smoke()
     finally:
         _clean()

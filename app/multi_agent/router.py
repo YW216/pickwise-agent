@@ -15,6 +15,10 @@ from app.prompts.agents import ROUTER_PROMPT
 SCENARIO_ORDER = ["presale", "consult"]
 DEFAULT_SCENARIO = "consult"
 
+# 路由上下文里单条消息的截断长度。路由只需「上一轮在谈什么」的概要，
+# 300 字符约一到两句中文，既压得住轻量分类 prompt，又不会截掉关键信息。
+_RECENT_CONTEXT_MAX_CHARS = 300
+
 
 class Router:
     """使用 LLM 对用户意图分类，输出 1-3 个场景词的有序列表。"""
@@ -96,9 +100,15 @@ class Router:
         lines = []
         for m in recent:
             role = "用户" if m["role"] == "user" else "助手"
-            content = m.get("content", "")
-            if content and len(content) < 200:
-                lines.append(f"{role}: {content}")
+            content = (m.get("content") or "").strip()
+            if not content:
+                continue
+            # 超长回复截断而非丢弃：长度型的回复（推荐清单、工具总结）恰恰承载
+            # 「上一轮在做什么」这一路由最需要的信息；整条滤掉会让路由只剩残缺的
+            # user 消息，多轮指代判定不稳（实测「游戏本」被误判为 consult）。
+            if len(content) > _RECENT_CONTEXT_MAX_CHARS:
+                content = content[:_RECENT_CONTEXT_MAX_CHARS] + "…"
+            lines.append(f"{role}: {content}")
         if not lines:
             return ""
         return "\n最近对话：\n" + "\n".join(lines) + "\n"

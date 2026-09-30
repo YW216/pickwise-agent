@@ -20,6 +20,7 @@ from app.agent.compaction import compact, should_compact
 from app.agent.context_budget import (
     ContextOverflowError,
     estimate_messages_tokens,
+    estimate_text_tokens,
     estimate_tool_definitions_tokens,
     is_context_overflow,
 )
@@ -52,6 +53,7 @@ class MultiAgentOrchestrator:
         self.summary_max_chars = settings.summary_max_chars
         self.tool_result_max_chars = settings.tool_result_max_chars
         self.max_react_steps = settings.max_react_steps
+        self.max_user_input_tokens = settings.max_user_input_tokens
 
         self.router = Router(self.client, self.model)
 
@@ -121,6 +123,19 @@ class MultiAgentOrchestrator:
         N=1 与 N>1 统一走并行执行器（N=1 是特例：线程池跑 1 个任务，
         无黑板、无 Result——Agent 最终文本直返，new_messages 全量合并，A 现状）。
         """
+        # 入口体量闸门：超长输入必须挡在进入历史之前。当前 user 消息永远不在
+        # 压缩范围内（_try_compact 的 active_user_index 把它排除在外），一旦入账，
+        # "输入本身超长"就没有任何机制能救——压缩删的是它之前的历史。
+        # 返回提示而非抛异常：这是可恢复的输入问题，不是系统故障；且不写历史、
+        # 不调 LLM，用户直接换个说法重试即可。
+        # （入口的完整校验——prompt 注入等——另立专项，此处只做体量。）
+        input_tokens = estimate_text_tokens(user_input)
+        if input_tokens > self.max_user_input_tokens:
+            return (
+                f"输入过长（约 {input_tokens} token，上限 "
+                f"{self.max_user_input_tokens}），请精简或分段提问。"
+            )
+
         self.raw_messages.append({"role": "user", "content": user_input})
         pack = self._build_pack()
         if self._try_compact(pack):
@@ -229,7 +244,8 @@ class MultiAgentOrchestrator:
             agent_pack = replace(pack, skill_catalog=self._skill_catalog_for(key))
             try:
                 messages = build_working_messages(agent_pack, AGENT_CONFIGS[key], mode)
-                _, new_messages = agent.handle(messages, max_steps=self.max_react_steps)
+
+                _, new_messages = agent.handle(messages, max_steps=self.max_react_steps)  #实际执行的位置
                 return BlackboardEntry(
                     agent=key, status="success", error=None,
                     new_messages=new_messages,
@@ -243,7 +259,8 @@ class MultiAgentOrchestrator:
                 return BlackboardEntry(
                     agent=key, status="failed", error=str(e), new_messages=[],
                 )
-
+                
+        #多线程并行执行场景 Agent，按顺序返回结果。   这跟线程池有关
         with ThreadPoolExecutor(max_workers=len(scenarios)) as pool:
             futures = {pool.submit(run, key): key for key in scenarios}
             results: dict[str, BlackboardEntry] = {}
@@ -252,11 +269,17 @@ class MultiAgentOrchestrator:
 
         # 工作线程全部结束后才做压缩重试；成功结果保留，失败子集最多重试一次。
         overflow = [key for key in scenarios if results[key].status == "overflow"]
-        if overflow and retry and self._try_compact(pack, force=True):
-            for entry in self._execute_agents(
-                overflow, self._build_pack(), mode, retry=False,
-            ):
-                results[entry.agent] = entry
+
+        #overflow为有失败的agent，retry表示可以重试（如果是第二次重试，retry是false不再接受重试了）
+        #这里就是先验证是否需要和可以处理
+        if overflow and retry:
+            # 先压，压成了才重试——压不动就没必要重跑（上下文一样大，必然二次溢出）。
+            # 注意 _try_compact 不是谓词：成功时它已经删过历史前缀、换过摘要了。
+            if self._try_compact(pack, force=True):
+                for entry in self._execute_agents(
+                    overflow, self._build_pack(), mode, retry=False,
+                ):
+                    results[entry.agent] = entry
         for entry in results.values():
             if entry.status == "overflow":
                 entry.status = "failed"
@@ -325,6 +348,8 @@ class MultiAgentOrchestrator:
             return False
 
         context_tokens = self._estimate_context_tokens(pack)
+        
+        # 非强制压缩且上下文未超过预算，直接返回。
         if not force and not should_compact(
             context_tokens, self.context_window, self.reserve_tokens,
         ):

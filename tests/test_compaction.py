@@ -140,7 +140,7 @@ def test_compact_sends_only_delta():
     assert "比较 LP-01" in client.calls[0]["messages"][1]["content"]
     assert "当前问题" not in client.calls[0]["messages"][1]["content"]
     assert summary == STRUCTURED_SUMMARY.strip()  # 纯六段叙述，商品块不再由压缩器生成
-    assert client.calls[0]["max_tokens"] == 2048
+    assert client.calls[0]["max_tokens"] == 4096
     # 压缩器是纯函数：不修改传入列表（删除由调用方事务性执行）
     assert messages == snapshot
 
@@ -191,6 +191,86 @@ def test_compact_retries_once_and_tolerates_trailing_whitespace():
     assert len(client.calls) == 2
     assert cut == 2
     assert summary == STRUCTURED_SUMMARY.strip()
+
+
+def test_compact_accepts_summary_at_realistic_length():
+    """回归（2026-09-29 真调踩坑）：摘要上限原为 2048 token。
+
+    实测第一次压缩生成的摘要就有 1701 字（约 1560 token），已逼近旧上限；
+    第二次压缩必然超限抛错 → 摘要只增不减 → 此后永久压不动 → 上下文涨到溢出。
+    上限提到 4096 token / 3000 字符后，这个规模应能正常通过。
+    """
+    filler = "候选机型的参数与结论记录。" * 120
+    at_limit = STRUCTURED_SUMMARY.replace("- 保留商品 ID 和价格", filler)
+    assert 1500 < len(at_limit) < 3000, "样本长度应贴近实测规模（1701 字）"
+
+    messages = [
+        {"role": "user", "content": "第一轮"},
+        {"role": "assistant", "content": "答复"},
+        {"role": "user", "content": "当前问题"},
+    ]
+    cut, summary = compact(
+        messages=messages,
+        summary=None,
+        client=FakeClient(at_limit),
+        model="test-model",
+        keep_recent_tokens=1,
+        end=3,
+    )
+
+    assert cut == 2
+    assert summary == at_limit.strip()
+
+
+def test_compact_condenses_overlong_summary():
+    """补救式自我压缩：增量摘要越限时，应调 condense 压回并提交精简版。"""
+    overlong = STRUCTURED_SUMMARY.replace("- 保留商品 ID 和价格", "填充" * 1600)
+    assert len(overlong) > 3000, "样本需超过 summary_max_chars"
+
+    messages = [
+        {"role": "user", "content": "第一轮"},
+        {"role": "assistant", "content": "答复"},
+        {"role": "user", "content": "当前问题"},
+    ]
+    # 第 1 次调用返回越限摘要（触发 condense），第 2 次返回精简版
+    client = FakeClient(overlong, STRUCTURED_SUMMARY)
+
+    cut, summary = compact(
+        messages=messages,
+        summary=None,
+        client=client,
+        model="test-model",
+        keep_recent_tokens=1,
+        end=3,
+    )
+
+    assert cut == 2
+    assert summary == STRUCTURED_SUMMARY.strip()   # 保存的是精简版，不是越限版
+    assert len(client.calls) == 2                  # 增量生成 1 次 + condense 1 次
+
+
+def test_compact_fails_when_condense_still_overlong():
+    """condense 之后仍越限 → 判失败（保持零副作用，绝不把越限摘要写进历史）。"""
+    overlong = STRUCTURED_SUMMARY.replace("- 保留商品 ID 和价格", "填充" * 1600)
+
+    messages = [
+        {"role": "user", "content": "第一轮"},
+        {"role": "assistant", "content": "答复"},
+        {"role": "user", "content": "当前问题"},
+    ]
+    client = FakeClient(overlong, overlong)        # 两次都越限
+
+    with pytest.raises(ValueError, match="长度上限"):
+        compact(
+            messages=messages,
+            summary=None,
+            client=client,
+            model="test-model",
+            keep_recent_tokens=1,
+            end=3,
+        )
+
+    assert len(client.calls) == 2
 
 
 def test_merge_products_extracts_from_tool_json_and_inherits_store():

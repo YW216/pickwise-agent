@@ -181,7 +181,12 @@ TOOL_DEFINITIONS: list[dict] = [
         "type": "function",
         "function": {
             "name": "get_detail",
-            "description": "按 product_id 查单个商品的价格与完整参数。",
+            "description": (
+                "按 product_id 查单个商品的价格与完整参数。适用于用户指名少数"
+                "几款、需要比对具体参数的场景（可一次批次内并发多款）。"
+                "批量罗列某品类清单时不必逐款调用：search_catalog 的候选卡片"
+                "已含名称/品牌/价格/定位，足以展示可选范围。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

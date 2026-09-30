@@ -3,7 +3,7 @@ from typing import Optional
 from openai import OpenAI
 
 from app.agent.context_budget import estimate_messages_tokens, tool_result_view
-from app.prompts.summarizer import SUMMARY_PROMPT
+from app.prompts.summarizer import CONDENSE_PROMPT, SUMMARY_PROMPT
 
 
 def summarize(
@@ -77,4 +77,41 @@ def summarize(
     choice = response.choices[0]
     if getattr(choice, "finish_reason", "stop") != "stop":
         raise ValueError("摘要生成未正常结束，保留原始历史")
+    return (choice.message.content or "").strip()
+
+
+def condense(
+    client: OpenAI,
+    model: str,
+    summary: str,
+    target_chars: int,
+    context_window: int = 200000,
+    max_tokens: int = 4096,
+) -> str:
+    """把过长的摘要重写为精简版（「摘要的摘要」）。
+
+    与 summarize() 的区别：输入是**摘要本身**（而非对话 delta），目标是**收缩**而非追加。
+
+    用途：摘要是增量累积的、只增不减，逼近长度上限后会永久压不动（此后每轮压缩
+    都超限失败，上下文只涨不跌直至溢出）。这里是撞墙前的补救——宁可丢掉部分叙述性
+    细节，也不能让压缩整体失效。硬事实（商品 ID / 价格 / 政策 / 错误）由 prompt
+    约束保留，它们是跨轮指代的锚点。
+    """
+    messages = [
+        {"role": "system", "content": CONDENSE_PROMPT.format(target_chars=target_chars)},
+        {"role": "user", "content": summary},
+    ]
+    if estimate_messages_tokens(messages) + max_tokens > context_window:
+        raise ValueError("精简输入超过上下文预算")
+    response = client.chat.completions.create(
+        model=model,
+        temperature=0.3,
+        messages=messages,
+        # 同 summarize：固定低思考强度，避免思考吃光输出预算导致正文为空
+        reasoning_effort="low",
+        max_tokens=max_tokens,
+    )
+    choice = response.choices[0]
+    if getattr(choice, "finish_reason", "stop") != "stop":
+        raise ValueError("精简生成未正常结束")
     return (choice.message.content or "").strip()
