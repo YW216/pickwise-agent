@@ -9,7 +9,7 @@ from typing import Optional
 
 from openai import OpenAI
 
-from app.prompts.agents import ROUTER_PROMPT
+from app.prompts.agents import ROUTER_OUTPUT_INSTRUCTION, ROUTER_PROMPT
 
 # 固定优先级顺序，替代旧版无序 set 遍历（修复多值输出命中顺序随机、不可复现的问题）
 SCENARIO_ORDER = ["presale", "consult"]
@@ -50,9 +50,16 @@ class Router:
             context_parts.append(f"【此前对话摘要】\n{summary}")
         context = "\n".join(context_parts)
 
-        prompt = ROUTER_PROMPT.format(user_input=user_input)
+        # 前缀缓存友好（KV cache）：ROUTER_PROMPT 是逐字节固定的常量，整体作为
+        # 稳定前缀；动态内容（最近对话 / 用户消息 / 输出指令）一律排在它后面。
+        # 旧写法把 context 拼在固定 prompt 之前、且 user_input 插在规则中间，
+        # 导致稳定段被推到后面、每条请求前缀都不同，前缀缓存零命中。
+        blocks = [ROUTER_PROMPT]
         if context:
-            prompt = context + "\n" + prompt
+            blocks.append(context.strip("\n"))
+        blocks.append(f"用户消息：{user_input}")
+        blocks.append(ROUTER_OUTPUT_INSTRUCTION)
+        prompt = "\n\n".join(blocks)
 
         response = self.client.chat.completions.create(
             model=self.model,

@@ -101,7 +101,11 @@ TOOL_DEFINITIONS: list[dict] = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回条数，默认 10",
+                        "description": (
+                            "返回条数，默认 10。上限 20——用户索要的清单超过上限时"
+                            "按上限返回即可，返回体中的 matched 会给出符合条件总数，"
+                            "据此提醒用户结果被截断并请其补充条件，不要逐款查详情"
+                        ),
                         "minimum": 1,
                         "maximum": 20,
                     },
@@ -168,7 +172,11 @@ TOOL_DEFINITIONS: list[dict] = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回商品数上限，默认 5",
+                        "description": (
+                            "返回商品数上限，默认 5，上限 20。语义检索按相似度取前 N 条，"
+                            "返回条数触达上限意味着可能还有更多相关商品，应提醒用户"
+                            "补充条件缩小范围"
+                        ),
                         "minimum": 1,
                         "maximum": 20,
                     },

@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     reasoning_effort: str = "high"
 
     # ReAct 循环
-    max_react_steps: int = 5
+    max_react_steps: int = 10
 
     # MCP 配置
     mcp_enabled: bool = False

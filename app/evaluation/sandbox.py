@@ -165,11 +165,16 @@ class Sandbox:
         return wrapper
 
     def _wrap_execute_tool(self, original, trace: RunTrace):
-        def wrapper(name: str, arguments: dict) -> str:
+        # 签名必须透传 *args/**kwargs，不能写死位置参数：execute_tool 在
+        # 2026-09-21「统一信封 + 同签名熔断」后多了第三个参数 seen，
+        # 而 Agent 侧一律走 execute_tool_as_message → 按位置传 3 个。
+        # 插桩是隐式耦合点（pytest 收不到），写死签名会让整层评测静默失效：
+        # 每次工具调用抛 TypeError → 全部用例进 trace.error → 判分全空。
+        def wrapper(name: str, arguments: dict, *args, **kwargs):
             # 工具执行上报为独立 span（input=参数，output=结果信封）——当前 trace
             # 由 run() 的 case_scope 决定；上报关闭时 span 为 None，纯旁路
             with self.reporter.tool_span(name, dict(arguments)) as span:
-                result_str = original(name, arguments)
+                result_str = original(name, arguments, *args, **kwargs)
                 if span is not None:
                     span.update(output=result_str)
             trace.tool_observations.append(

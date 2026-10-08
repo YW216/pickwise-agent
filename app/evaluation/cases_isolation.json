@@ -1,0 +1,94 @@
+{
+  "meta": {
+    "purpose": "历史降级回归集：验证「跨 Agent 历史工具名泄漏」是否被真正消除",
+    "background": "多 Agent 共享 raw_messages，其中含其他 Agent 的 tool_calls 轨迹。模型看到邻居用过某工具会模仿去调它，而执行层按白名单必然拒收（fail「未知工具」），白费一轮 LLM。修复手段是 _project_history——按 Agent 白名单把越权工具块折叠为中性文本（2026-10-07）。",
+    "why_separate": "主集 cases.json 的 20 条**测不出**这个机制：17 条单轮（无历史可降级），multiturn_reference_price / multiturn_budget_change 两轮都是 presale（同 Agent，工具全在白名单内不触发）。20 条里唯一可能触发的是 multiturn_switch_consult，但其 turn2 是纯知识问句（OLED/IPS），无「再搜商品」意图 → 不诱发模仿。",
+    "how_to_compare": "同一份用例集跑两次：git stash push app/multi_agent/context_pack.py（降级前）→ run → git stash pop（降级后）→ run。对比 '工具调用序列' 与 '是否出现被拒(失败)调用'。",
+    "pass_criterion": "降级前出现「被拒的 search_products 调用」（模型模仿越权），降级后消失。注意：单次运行不足以定论，LLM 有随机性，建议各跑 3 次取均值。",
+    "not_in_pass": "expected_route / expected_tools 只保证用例本身能被正常判分，**核心证据是 tool_observations 里的被拒调用**，不是 pass/fail。"
+  },
+  "cases": [
+    {
+      "id": "leak_probe_explicit_research",
+      "category": "隔离回归",
+      "description": "显式再搜诱饵：turn2 显式说「再帮我搜一下」，诱导 consult 模仿历史中 presale 的 search_products",
+      "turns": [
+        "推荐一款适合通勤的降噪耳机",
+        "再帮我搜一下有没有更便宜的通勤耳机？"
+      ],
+      "expected_route": [
+        "presale",
+        "presale/consult|consult/presale|consult"
+      ],
+      "expected_tools": [
+        "search_products"
+      ],
+      "valid_ids_only": true,
+      "judge_aspects": [
+        "process"
+      ]
+    },
+    {
+      "id": "leak_probe_catalog_mimic",
+      "category": "隔离回归",
+      "description": "换一种越权诱导：turn2 用「列一下在售」暗示穷举，诱发 consult 模仿 presale 的 search_catalog",
+      "turns": [
+        "预算5000左右的笔记本有哪些",
+        "把目前在售的都列一下，我慢慢看"
+      ],
+      "expected_route": [
+        "presale",
+        "presale/consult|consult/presale|consult"
+      ],
+      "expected_tools": [
+        "search_catalog"
+      ],
+      "valid_ids_only": true,
+      "judge_aspects": [
+        "process"
+      ]
+    },
+    {
+      "id": "leak_probe_backtrack",
+      "category": "隔离回归",
+      "description": "第三轮强诱导：连续两轮 presale 后由 consult 接管，turn3 直接要求「再搜一次」——累积历史里越权工具名最多，泄漏压力最大",
+      "turns": [
+        "推荐一款适合写代码的笔记本",
+        "预算6000左右，有推荐吗",
+        "再搜一下有没有更轻便的"
+      ],
+      "expected_route": [
+        "presale",
+        "presale/consult|consult/presale|consult",
+        "presale/consult|consult/presale|consult"
+      ],
+      "expected_tools": [
+        "search_products"
+      ],
+      "valid_ids_only": true,
+      "judge_aspects": [
+        "process"
+      ]
+    },
+    {
+      "id": "leak_control_same_agent",
+      "category": "隔离回归",
+      "description": "对照组：两轮都走 presale（同 Agent，工具全在白名单内）——降级**不应**触发，工具轨迹必须完整保留。这条是防误伤的锚点，若它也变了说明降级范围写宽了。",
+      "turns": [
+        "推荐一款适合通勤的降噪耳机",
+        "再帮我搜一下有没有更便宜的通勤耳机？"
+      ],
+      "expected_route": [
+        "presale",
+        "presale"
+      ],
+      "expected_tools": [
+        "search_products"
+      ],
+      "valid_ids_only": true,
+      "judge_aspects": [
+        "process"
+      ]
+    }
+  ]
+}
