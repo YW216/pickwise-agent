@@ -46,3 +46,4 @@ develop_docs/
 _e2e.log
 _retest.log
 .workbuddy/tmp/
+.workbuddy

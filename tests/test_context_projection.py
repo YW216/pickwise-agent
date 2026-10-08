@@ -14,7 +14,7 @@
 """
 
 from app.multi_agent.agents import AGENT_CONFIGS
-from app.multi_agent.context_pack import ContextPack, build_working_messages
+from app.multi_agent.context_pack import ContextPack, _project_history, build_working_messages
 
 
 def _foreign_history():
@@ -47,7 +47,7 @@ def test_pure_foreign_block_is_collapsed():
     tail = msgs[1:]
     assert len(tail) == 4, f"期望 4 条，实际 {len(tail)}: {tail}"
     assert tail[0]["role"] == "user" and "6000" in tail[0]["content"]
-    assert tail[1]["role"] == "assistant" and "其他专家" in tail[1]["content"]
+    assert tail[1]["role"] == "assistant" and "上一轮" in tail[1]["content"]
     assert tail[2]["role"] == "assistant" and "星海 Note 12" in tail[2]["content"]
     assert tail[3]["role"] == "user" and "保修" in tail[3]["content"]
 
@@ -100,6 +100,53 @@ def test_no_orphan_tool_message_after_collapse():
             for t in msgs:
                 if t.get("role") == "tool":
                     assert t["tool_call_id"] in ids, "出现孤儿 tool 消息"
+
+
+def test_collapsed_text_matches_tool_semantics():
+    """折叠文案必须匹配被折叠工具的真实语义，不能一律说"信息检索"。
+
+    反例动机：把"读取用户收藏夹/记忆"说成"完成了一次信息检索"，会让下一轮
+    模型以为偏好信息已查过→ 跳过 recall_user_memory 直接编造。**文案失真比
+    泄漏工具名代价更大**。
+    """
+    # 注意只列**越权**工具（presale 独占）：共享工具（load_skill/retrieve_knowledge/
+    # get_detail）不折叠，原文保留不进本用例。
+    cases = [
+        (["search_products"], "检索"),
+        (["search_catalog", "search_products"], "检索"),
+        (["compare_products"], "对比"),
+        (["get_user_favorites"], "用户偏好"),
+        (["recall_user_memory"], "用户偏好"),
+    ]
+    consult = AGENT_CONFIGS["consult"]["tools"]
+    for names, keyword in cases:
+        block = [{
+            "role": "assistant", "content": "",
+            "tool_calls": [
+                {"id": f"c{i}", "type": "function",
+                 "function": {"name": n, "arguments": "{}"}}
+                for i, n in enumerate(names)
+            ],
+        }]
+        msgs = _project_history(block, consult)
+        note = msgs[0]["content"]
+        assert keyword in note, f"{names} 应含『{keyword}』，实际：{note}"
+
+
+def test_mixed_semantics_falls_back_to_generic():
+    """块内工具跨语义类别 → 用通用文案，不给错语义。"""
+    consult = AGENT_CONFIGS["consult"]["tools"]
+    block = [{
+        "role": "assistant", "content": "",
+        "tool_calls": [
+            {"id": "c0", "type": "function",
+             "function": {"name": "search_products", "arguments": "{}"}},
+            {"id": "c1", "type": "function",
+             "function": {"name": "compare_products", "arguments": "{}"}},
+        ],
+    }]
+    note = _project_history(block, consult)[0]["content"]
+    assert "工具调用" in note, note
 
 
 def test_no_allowlist_means_no_projection():
