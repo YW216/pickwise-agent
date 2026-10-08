@@ -124,6 +124,8 @@ def main():
         api_key=settings.embedding_api_key,
         base_url=settings.embedding_base_url,
         model=settings.embedding_model,
+        timeout=settings.openai_timeout,
+        max_retries=settings.openai_max_retries,
     )
     kb_backend = MilvusBackend(uri=uri, collection_name=settings.milvus_collection)
     kb_backend.load()

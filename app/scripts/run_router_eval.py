@@ -36,7 +36,10 @@ def main() -> None:
     args = parser.parse_args()
 
     cases = load_router_cases(args.cases_file)
-    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+    client = OpenAI(
+        api_key=settings.openai_api_key, base_url=settings.openai_base_url,
+        timeout=settings.openai_timeout, max_retries=settings.openai_max_retries,
+    )
     router = Router(client, settings.model_name)
 
     # ---------- 逐条评测 ----------

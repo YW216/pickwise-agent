@@ -245,7 +245,10 @@ def main() -> None:
     from openai import OpenAI
     # judge 的 client 也会被 langfuse 的类级补丁接到（wrapt 全局补丁）：评测侧
     # 不主动为其建 trace，而是由 evaluator 把 judge 调用挂回对应用例 trace 下
-    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+    client = OpenAI(
+        api_key=settings.openai_api_key, base_url=settings.openai_base_url,
+        timeout=settings.openai_timeout, max_retries=settings.openai_max_retries,
+    )
     evaluator = Evaluator(
         sandbox=Sandbox(reporter=reporter), client=client,
         model=settings.model_name, reporter=reporter,

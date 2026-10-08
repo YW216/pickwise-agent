@@ -87,6 +87,8 @@ def main():
         api_key=settings.embedding_api_key,
         base_url=settings.embedding_base_url,
         model=settings.embedding_model,
+        timeout=settings.openai_timeout,
+        max_retries=settings.openai_max_retries,
     )
     vectors = embedder.encode(texts)
     print(f"   完成，向量维度 = {len(vectors[0])}")

@@ -49,7 +49,8 @@ class RunTrace:
     # 供 process judge 按轮对齐材料（v2 修复"最后一轮问题 vs 全会话调用"错位）
     tool_boundaries: list[int] = field(default_factory=list)
     langfuse_trace_id: str | None = None  # 上报开启时该用例的 Langfuse trace id（判分后挂 score）
-    error: str | None = None  # 运行异常信息，None=正常
+    error: str | None = None  # 未捕获运行异常；降级故障独立记录，不冒充无故障
+    runtime_failures: list[dict] = field(default_factory=list)
 
     # ---------- 便捷聚合属性 ----------
     @property
@@ -117,4 +118,5 @@ class RunTrace:
             "tool_boundaries": self.tool_boundaries,
             "langfuse_trace_id": self.langfuse_trace_id,
             "error": self.error,
+            "runtime_failures": self.runtime_failures,
         }

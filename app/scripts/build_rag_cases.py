@@ -113,7 +113,10 @@ def main():
     )
     args = parser.parse_args()
 
-    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+    client = OpenAI(
+        api_key=settings.openai_api_key, base_url=settings.openai_base_url,
+        timeout=settings.openai_timeout, max_retries=settings.openai_max_retries,
+    )
     model = settings.model_name
     out_path = ROOT / args.out
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,6 +178,8 @@ def main():
             api_key=settings.embedding_api_key,
             base_url=settings.embedding_base_url,
             model=settings.embedding_model,
+            timeout=settings.openai_timeout,
+            max_retries=settings.openai_max_retries,
         )
         vecs = embedder.encode([c["query"] for c in pcases])
         print(f"标注补全：复核 {len(pcases)} 条商品 case 的 top5（对齐生产：top_k=5 + max_price 过滤）")

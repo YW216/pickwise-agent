@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     # 空串 = 不传该参数（用服务端默认行为）。
     reasoning_effort: str = "high"
 
+    # LLM HTTP 阶段超时，不是整次 chat/Agent 的 deadline。
+    # SDK 2.28.0 默认 read=600s；显式设 60s，避免一次等待过长。
+    # max_retries=2 表示首次请求 + 最多两次重试，叠加退避后可能超过 60s。
+    # SDK 负责连接/超时、408/409/429、>=500 等传输故障；应用不重复叠加。
+    openai_timeout: float = Field(default=60.0, gt=0)
+    # LLM HTTP 重试不会执行本地写工具，也不会生成应用层 run_id。
+    # 写工具需要业务幂等/执行记录；Agent 重放风险与此配置分开治理，
+    # 不能把“关闭 LLM 重试”当作避免重复下单/退款的充分条件。
+    openai_max_retries: int = Field(default=2, ge=0)
+
     # ReAct 循环
     max_react_steps: int = 10
 

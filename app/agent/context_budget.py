@@ -1,13 +1,34 @@
-"""请求上下文预算与工具结果视图；不修改持久化的原始消息。"""
+"""请求上下文预算与工具结果视图；不修改持久化的原始消息。
+
+错误判定的两个正交维度（两者都刻意收窄，宁可漏判也不误判）：
+- `is_context_overflow`：是不是**上下文超长** → 可压缩重试
+- `is_transient`：是不是**瞬时故障** → 可降级回答
+把二者混为一谈会出事：400 参数错误压缩无用，连接中断压缩也无用。
+"""
 
 import json
 import math
 
-from openai import BadRequestError
+from openai import (
+    APIConnectionError, APIStatusError, APITimeoutError, BadRequestError, RateLimitError,
+)
 
 
 class ContextOverflowError(RuntimeError):
-    """子 Agent 首次请求超窗，尚未执行工具，可以由编排器压缩后重试。"""
+    """子 Agent 任意步超窗，由编排器压缩后重放；写工具需另有幂等保护。"""
+
+
+def is_transient(exc: Exception) -> bool:
+    """SDK 重试耗尽后的可降级故障；不把普通 400/鉴权错误和代码 bug 纳入。
+
+    只认明确 SDK 异常类型及传输状态，不靠异常文案猜测；
+    与上下文溢出判定正交。应用侧不重复执行 SDK 的 HTTP 重试。
+    """
+    if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
+        return True
+    return isinstance(exc, APIStatusError) and (
+        exc.status_code in {408, 409, 429} or 500 <= exc.status_code < 600
+    )
 
 
 def is_context_overflow(exc: Exception) -> bool:

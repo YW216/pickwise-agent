@@ -119,6 +119,18 @@ class Evaluator:
         )
         if not trace.error:
             result.checks = metrics.run_checks(case, trace)
+            # 正常端到端评测不能把“服务故障兜底文本”算成成功答案。
+            # 记忆/落盘等附属故障仍落 trace，但不否定已经交付的回答。
+            answer_failures = [
+                failure for failure in trace.runtime_failures
+                if failure.get("affects_answer", True)
+            ]
+            result.checks.append(metrics.CheckResult(
+                name="runtime", applicable=True, passed=not answer_failures,
+                detail="; ".join(
+                    f"{f['stage']}: {f['error_type']}" for f in answer_failures
+                ) or "未发生影响答复的运行时降级",
+            ))
             result.judge_scores = self._run_judges(case, trace)
             if case.expected_tools:
                 succeeded = set(metrics.successful_tool_names(trace))

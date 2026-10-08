@@ -80,9 +80,13 @@ class Sandbox:
                 agent = self._build_agent(session_path)
                 self._instrument(agent, trace, patches)
 
-                for turn in case.turns:
+                for turn_index, turn in enumerate(case.turns):
                     reply = agent.chat(turn)
                     trace.replies.append(reply)
+                    trace.runtime_failures.extend(
+                        {**failure, "turn_index": turn_index}
+                        for failure in getattr(agent, "last_failures", [])
+                    )
                     trace.routes.append(list(trace._pending_route or []))
                     trace._pending_route = []
                     # 轮次边界：本轮结束时的观测数，供 process judge 按轮切分调用序列
@@ -95,6 +99,18 @@ class Sandbox:
                     setattr(obj, attr, original)
                 if agent is not None:
                     self._close_tool_managers(agent)
+                    # 只关闭本用例拥有的 HTTP client，不触发 agent.close() 的记忆写入。
+                    close_client = getattr(getattr(agent, "client", None), "close", None)
+                    if close_client is not None:
+                        try:
+                            close_client()
+                        except Exception as exc:
+                            trace.runtime_failures.append({
+                                "stage": "client_close",
+                                "error_type": type(exc).__name__,
+                                "message": str(exc),
+                                "affects_answer": False,
+                            })
                 # 注意：刻意不调用 agent.close()，避免长期记忆巩固写入
 
         return trace

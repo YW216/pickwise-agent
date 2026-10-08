@@ -25,6 +25,7 @@ class BlackboardEntry:
     error: str | None         # 失败或溢出原因（status != success 时有值）
     new_messages: list[dict]  # handle() 返回的本轮轨迹（思考/工具对/最终答复），
                               # 原样引用；其中 tool 消息是入库时生成的视图，与模型所见一致
+    error_type: str | None = None  # 原始异常类型，仅诊断，不渲染给用户
 
 
 def render_blackboard(

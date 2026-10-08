@@ -19,8 +19,14 @@ class Embedder:
         base_url: str,
         model: str = "text-embedding-3-small",
         batch_size: int = 64,
+        *,
+        timeout: float = 60.0,
+        max_retries: int = 2,
     ):
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        self._client = OpenAI(
+            api_key=api_key, base_url=base_url,
+            timeout=timeout, max_retries=max_retries,
+        )
         self._model = model
         self._batch_size = batch_size
 

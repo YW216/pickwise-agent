@@ -28,6 +28,8 @@ def _get_retriever() -> KnowledgeRetriever:
             api_key=settings.embedding_api_key,
             base_url=settings.embedding_base_url,
             model=settings.embedding_model,
+            timeout=settings.openai_timeout,
+            max_retries=settings.openai_max_retries,
         )
         backend = MilvusBackend(
             uri=settings.milvus_uri,

@@ -109,7 +109,7 @@ class SubAgent:
                 self._print_thought(assistant_msg.content)
 
             if not assistant_msg.tool_calls:
-                content = assistant_msg.content or ""
+                content = self._final_text(response)
                 msg = {"role": "assistant", "content": content}
                 new_messages.append(msg)
                 return content, new_messages
@@ -164,9 +164,22 @@ class SubAgent:
                 raise
             # 溢出同样上抛：编排器压缩后整体重试一次（策略与循环内一致，见 handle 注释）
             raise ContextOverflowError(str(exc)) from exc
-        content = response.choices[0].message.content or ""
+        content = self._final_text(response)
         new_messages.append({"role": "assistant", "content": content})
         return content, new_messages
+
+    @staticmethod
+    def _final_text(response) -> str:
+        """HTTP 成功不等于任务成功：空正文/截断/未完成调用不能当最终答复。"""
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        if (
+            not isinstance(content, str) or not content.strip()
+            or getattr(choice, "finish_reason", None) == "length"
+            or getattr(choice.message, "tool_calls", None)
+        ):
+            raise ValueError("模型未返回完整有效的最终答复")
+        return content
 
     def _complete(self, messages: list[dict], tools: list[dict]):
         """每次 LLM 请求前检查完整输入，并记录真实 usage 供估算校准。"""

@@ -23,12 +23,13 @@ from app.agent.context_budget import (
     estimate_text_tokens,
     estimate_tool_definitions_tokens,
     is_context_overflow,
+    is_transient,
 )
 from app.agent.product_tracker import format_products_block, merge_products
 from app.config.settings import settings
 from app.multi_agent.agents import AGENT_CONFIGS, SubAgent
 from app.multi_agent.blackboard import BlackboardEntry, render_blackboard
-from app.multi_agent.router import Router
+from app.multi_agent.router import DEFAULT_SCENARIO, Router
 from app.agent.tools.manager import ToolManager
 from app.multi_agent.context_pack import ContextPack, build_working_messages
 from app.prompts.agents import RESULT_PROMPT
@@ -41,6 +42,8 @@ class MultiAgentOrchestrator:
         self.client = openai.OpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
+            timeout=settings.openai_timeout,
+            max_retries=settings.openai_max_retries,
         )
         self.model = settings.model_name
         self.temperature = settings.temperature
@@ -104,6 +107,8 @@ class MultiAgentOrchestrator:
         self.summary: Optional[str] = None
         # 商品记忆：跨压缩累积的商品 ID/名称/提及价（product_tracker 独立存储）
         self.products: dict = {}
+        # 每轮重置；仅用于诊断/评测，不把内部异常写进用户回复。
+        self.last_failures: list[dict] = []
 
         loaded = load_session(self.session_path)
         if loaded:
@@ -118,40 +123,118 @@ class MultiAgentOrchestrator:
         return len(self.raw_messages)
 
     def chat(self, user_input: str) -> str:
-        """路由 → 场景 Agent 并行执行 →（多场景）Result 整合 → 返回回复文本。
+        """主答复与附属工作分离：失败保留用户消息，成功答案不被记忆/落盘覆盖。
 
-        N=1 与 N>1 统一走并行执行器（N=1 是特例：线程池跑 1 个任务，
-        无黑板、无 Result——Agent 最终文本直返，new_messages 全量合并，A 现状）。
+        入口拒绝不写历史；已入账的失败轮只补一次最终回复。
+        内部错误只记录到 last_failures，不输出日志；用户只看到能力级提示。
         """
-        # 入口体量闸门：超长输入必须挡在进入历史之前。当前 user 消息永远不在
-        # 压缩范围内（_try_compact 的 active_user_index 把它排除在外），一旦入账，
-        # "输入本身超长"就没有任何机制能救——压缩删的是它之前的历史。
-        # 返回提示而非抛异常：这是可恢复的输入问题，不是系统故障；且不写历史、
-        # 不调 LLM，用户直接换个说法重试即可。
-        # （入口的完整校验——prompt 注入等——另立专项，此处只做体量。）
-        input_tokens = estimate_text_tokens(user_input)
-        if input_tokens > self.max_user_input_tokens:
-            return (
-                f"输入过长（约 {input_tokens} token，上限 "
-                f"{self.max_user_input_tokens}），请精简或分段提问。"
-            )
+        self.last_failures = []
+        turn_started = False
+        completed = False
+        try:
+            input_tokens = estimate_text_tokens(user_input)
+            if input_tokens > self.max_user_input_tokens:
+                return (
+                    f"输入过长（约 {input_tokens} token，上限 "
+                    f"{self.max_user_input_tokens}），请精简或分段提问。"
+                )
+            self.raw_messages.append({"role": "user", "content": user_input})
+            turn_started = True
+            reply = self._chat_inner(user_input)
+            completed = True
+        except Exception as exc:  # 最外层保护用户体验；错误不靠静默吞掉处理
+            reply = self._on_failure(user_input, exc)
+            if turn_started:
+                self.raw_messages.append({"role": "assistant", "content": reply})
 
-        self.raw_messages.append({"role": "user", "content": user_input})
+        if turn_started:
+            if completed:
+                try:
+                    self.memory_manager.update_short_term(self.raw_messages[-6:])
+                except Exception as exc:
+                    self._record_failure("memory", exc, affects_answer=False)
+            self._save_safely()
+        return reply
+
+    def _record_failure(
+        self, stage: str, exc: Exception, *, affects_answer: bool = True,
+    ) -> None:
+        """记录故障事实，不引入异常继承体系，也不改变现有 client 插桩入口。"""
+        if not hasattr(self, "last_failures"):
+            self.last_failures = []
+        self.last_failures.append({
+            "stage": stage,
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+            "affects_answer": affects_answer,
+        })
+
+    def _save_safely(self) -> None:
+        """本轮只尝试一次落盘；失败保留内存会话与答复，并明确留下诊断记录。"""
+        try:
+            self.save()
+        except Exception as exc:
+            self._record_failure("persistence", exc, affects_answer=False)
+
+    def _on_failure(self, user_input: str, exc: Exception) -> str:
+        """只生成失败话术与诊断；历史提交/保存由 chat 单点负责。"""
+        self._record_failure("chat", exc)
+        agent_key = self._failed_agent_key(exc)
+        if agent_key:
+            return (
+                f"{AGENT_CONFIGS[agent_key]['name']}暂时无法访问，"
+                "请稍后重试。"
+            )
+        return "服务暂时不可用，请稍后重试。"
+
+    @staticmethod
+    def _failed_agent_key(exc: Exception) -> Optional[str]:
+        """从异常消息里取失败环节的 agent key；取不到返回 None。
+
+        不新增异常子类：单 Agent 失败时上抛的是
+        `RuntimeError(f"[{entry.agent}] 执行失败: ...")`（见 _chat_inner），
+        已带 `[<key>]` 前缀，直接解析即可——为一次失败引入继承体系不划算。
+        """
+        text = str(exc)
+        for key in AGENT_CONFIGS:
+            if text.startswith(f"[{key}] 执行失败:"):
+                return key
+        return None
+
+    def _chat_inner(self, user_input: str) -> str:
+        """只完成路由、专家执行和最终回复提交；记忆/持久化在 chat 外层处理。"""
         pack = self._build_pack()
         if self._try_compact(pack):
-            pack = self._build_pack()  # summary 已更新、旧消息已删除，重建上下文包
-        try:
-            scenarios = self.router.route(user_input, pack.history, summary=pack.summary)
-        except Exception as exc:
-            if not is_context_overflow(exc) or not self._try_compact(pack, force=True):
-                raise
             pack = self._build_pack()
-            scenarios = self.router.route(user_input, pack.history, summary=pack.summary)
+        # SDK 已负责 HTTP 重试；这里最多一次压缩补救，不再叠加传输重试。
+        for attempt in range(2):
+            try:
+                scenarios = self.router.route(user_input, pack.history, summary=pack.summary)
+                break
+            except Exception as exc:
+                overflow = isinstance(exc, ContextOverflowError) or is_context_overflow(exc)
+                if overflow and attempt == 0 and self._try_compact(pack, force=True):
+                    pack = self._build_pack()
+                    continue
+                if is_transient(exc):
+                    # 默认咨询可能不能完成推荐诉求：明确记为降级，而不是无损成功。
+                    self._record_failure("router", exc)
+                    scenarios = [DEFAULT_SCENARIO]
+                    break
+                raise
         mode = "single" if len(scenarios) == 1 else "multi"
         names = "、".join(AGENT_CONFIGS[k]["name"] for k in scenarios)
         print(f"\n🔀 [路由] → {names}（场景: {', '.join(scenarios)}，模式: {mode}）")
 
         entries = self._execute_agents(scenarios, pack, mode)
+        for entry in entries:
+            if entry.status == "failed":
+                self.last_failures.append({
+                    "stage": f"agent:{entry.agent}",
+                    "error_type": entry.error_type or "AgentExecutionError",
+                    "message": entry.error or "专家执行失败",
+                    "affects_answer": True,
+                })
 
         if len(entries) == 1:
             entry = entries[0]
@@ -169,13 +252,6 @@ class MultiAgentOrchestrator:
                     self.raw_messages.extend(entry.new_messages[:-1])
             self.raw_messages.append({"role": "assistant", "content": reply})
 
-        self.memory_manager.update_short_term(self.raw_messages[-6:])
-
-        save_session(
-            self.session_path, self.raw_messages, self.summary,
-            short_term_memory=self.memory_manager.stm_to_dict(),
-            products=self.products,
-        )
         return reply
 
     def reset(self):
@@ -193,11 +269,21 @@ class MultiAgentOrchestrator:
         )
 
     def close(self):
-        self.memory_manager.consolidate_to_long_term(
-            self.raw_messages, self.summary,
-        )
-        for agent in self.agents.values():
-            agent.tool_manager.close()
+        """长期记忆提取失败不阻止资源清理，也不覆盖已经返回的答案。"""
+        try:
+            self.memory_manager.consolidate_to_long_term(self.raw_messages, self.summary)
+        except Exception as exc:
+            self._record_failure("long_term_memory", exc, affects_answer=False)
+        finally:
+            for agent in self.agents.values():
+                try:
+                    agent.tool_manager.close()
+                except Exception as exc:
+                    self._record_failure("tool_close", exc, affects_answer=False)
+            try:
+                self.client.close()
+            except Exception as exc:
+                self._record_failure("client_close", exc, affects_answer=False)
 
     def _build_pack(self) -> ContextPack:
         """构建本轮请求的上下文包（Router 与 Agent 共享的唯一事实来源）。
@@ -245,7 +331,15 @@ class MultiAgentOrchestrator:
             try:
                 messages = build_working_messages(agent_pack, AGENT_CONFIGS[key], mode)
 
-                _, new_messages = agent.handle(messages, max_steps=self.max_react_steps)  #实际执行的位置
+                _, new_messages = agent.handle(messages, max_steps=self.max_react_steps)
+                if (
+                    not new_messages
+                    or new_messages[-1].get("role") != "assistant"
+                    or new_messages[-1].get("tool_calls")
+                    or not isinstance(new_messages[-1].get("content"), str)
+                    or not new_messages[-1]["content"].strip()
+                ):
+                    raise ValueError("专家未返回有效的最终答复")
                 return BlackboardEntry(
                     agent=key, status="success", error=None,
                     new_messages=new_messages,
@@ -253,11 +347,12 @@ class MultiAgentOrchestrator:
             except ContextOverflowError as exc:
                 return BlackboardEntry(
                     agent=key, status="overflow", error=str(exc), new_messages=[],
+                    error_type=type(exc).__name__,
                 )
             except Exception as e:  # 宽捕获：失败进黑板，不中断其余 Agent
-                print(f"  ⚠️ [{agent.name}] 执行失败: {e}")
                 return BlackboardEntry(
                     agent=key, status="failed", error=str(e), new_messages=[],
+                    error_type=type(e).__name__,
                 )
                 
         #多线程并行执行场景 Agent，按顺序返回结果。   这跟线程池有关
@@ -288,19 +383,17 @@ class MultiAgentOrchestrator:
     def _run_result_agent(
         self, entries: list[BlackboardEntry], user_input: str,
     ) -> str:
-        """Result Agent：读黑板全部条目，整合成统一回复（调 LLM、不调工具）。
-
-        输入 = 黑板全量轨迹文本渲染（决策 #13）+ 用户原始问题；
-        输出 = 一条面向用户的回复文本（8.2 prompt 九条约束）。
-        """
-        board_text = render_blackboard(entries, self.tool_result_max_chars)
-        messages = [
-            {"role": "system", "content": RESULT_PROMPT},
-            {"role": "user", "content": (
-                f"用户原始问题：\n{user_input}\n\n各专家工作记录：\n{board_text}"
-            )},
-        ]
+        """Result 读黑板整合；故障/空正文保留专家结论，不把内部异常传给用户。"""
+        if not any(entry.status == "success" for entry in entries):
+            return self._result_fallback(entries)
         try:
+            board_text = render_blackboard(entries, self.tool_result_max_chars)
+            messages = [
+                {"role": "system", "content": RESULT_PROMPT},
+                {"role": "user", "content": (
+                    f"用户原始问题：\n{user_input}\n\n各专家工作记录：\n{board_text}"
+                )},
+            ]
             if estimate_messages_tokens(messages) > self.context_window - self.reserve_tokens:
                 raise ContextOverflowError("汇总上下文超过预算")
             response = self.client.chat.completions.create(
@@ -311,16 +404,30 @@ class MultiAgentOrchestrator:
                 **({"reasoning_effort": settings.reasoning_effort}
                    if settings.reasoning_effort else {}),
             )
-            return response.choices[0].message.content or ""
+            choice = response.choices[0]
+            content = choice.message.content or ""
+            if not content.strip() or getattr(choice, "finish_reason", None) == "length":
+                raise ValueError("汇总未返回完整有效正文")
+            return content
         except Exception as exc:
-            if not isinstance(exc, ContextOverflowError) and not is_context_overflow(exc):
-                raise
-            print("[汇总] 上下文超限，返回已有结论")
-            return "\n\n".join(
-                entry.new_messages[-1]["content"] if entry.status == "success"
-                else f"{AGENT_CONFIGS[entry.agent]['name']}部分暂时无法回答。"
-                for entry in entries
+            self._record_failure("result", exc)
+            return self._result_fallback(entries)
+
+    @staticmethod
+    def _result_fallback(entries: list[BlackboardEntry]) -> str:
+        """仅展示已完成结论和能力级失败提示；不输出 traceback/原始异常。"""
+        parts = []
+        for entry in entries:
+            name = AGENT_CONFIGS[entry.agent]["name"]
+            content = (
+                entry.new_messages[-1].get("content", "")
+                if entry.status == "success" and entry.new_messages else ""
             )
+            if isinstance(content, str) and content.strip():
+                parts.append(f"【{name}】\n{content}")
+            else:
+                parts.append(f"{name}部分暂时无法回答，请稍后重试。")
+        return "\n\n".join(parts) or "服务暂时不可用，请稍后重试。"
 
     def _estimate_context_tokens(self, pack: ContextPack) -> int:
         """按所有 Agent 中的最大请求估算上下文，覆盖 prompt 与 tool schema。"""
@@ -373,7 +480,7 @@ class MultiAgentOrchestrator:
                 tool_result_max_chars=self.tool_result_max_chars,
             )
         except Exception as exc:
-            print(f"⚠️  [压缩] 失败，保留原上下文: {exc}")
+            self._record_failure("compaction", exc, affects_answer=False)
             return False
 
         if cut <= 0:
