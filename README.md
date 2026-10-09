@@ -1,295 +1,409 @@
-# PickWise · 选购助手「小P」
+<div align="center">
+  <img src="assets/pickwise-banner.jpg" alt="PickWise 智能 3C 选购助手" width="100%" />
 
-> 一个用纯 Python 编排的 **多Agent 3C 选购决策助手**。不依赖 LangChain / LangGraph，手写 ReAct 循环与多 Agent 编排，配双层自动化评估体系。
+  <h1>PickWise · 智能 3C 选购决策助手</h1>
+  <p><strong>纯 Python 编排 · 手写 ReAct · 不依赖 LangChain / LangGraph · 7 个直接依赖</strong></p>
+  <p>让每一次 3C 选购，都更明智。</p>
 
-CLI 交互入口，纯后端项目（无 Web 前端）。
-
----
-
-## 核心设计：一条路径的编排
-
-单 Agent / 多 Agent **不是两套模式**，而是同一条路径的两个特例 —— N=1 时直返，N>1 时走汇总。
-
-```
-用户输入
-   │
-   ├─ 1. 构建 ContextPack（历史 / 摘要 / 记忆 / 技能目录 / 商品记忆）
-   ├─ 2. 上下文压缩（事务式，失败零副作用）
-   ├─ 3. Router 判定场景 → ["presale"] / ["consult"] / 两者
-   ├─ 4. 场景内并行执行（ThreadPoolExecutor）
-   │       presale  售前Agent · 8 个工具
-   │       consult  咨询 Agent · 3 个工具
-   ├─ 5. N=1 → 直接返回N>1 → Result Agent 汇总黑板
-   └─ 6. 记忆更新 → 落盘
-
-返回纯文本 reply
-```
-
-### 场景与Agent
-
-| Agent | 场景 | 工具数 | 工具清单 |
-|---|---|---|---|
-| `presale` | 售前选购 | 8 | `search_catalog`、`get_user_favorites`、`search_products`、`get_detail`、`compare_products`、`retrieve_knowledge`、`load_skill`、`recall_user_memory` |
-| `consult` | 售前咨询 | 3 | `retrieve_knowledge`、`get_detail`、`load_skill` |
-
-**工具白名单是硬隔离**（按 Agent 维度裁剪 function schema），不是靠 prompt 请求模型自觉。Router 规则写在 prompt 里，Python 侧只做输出解析与固定顺序重排，保证结果可复现。
-
-### 三个不那么显然的设计
-
-**1. 历史视图投影** —— 共享历史里含其他 Agent 的 `tool_calls`，模型看到邻居用过某工具会模仿调用，而执行层必然拒收，白费两轮 LLM。解法是按「整块」（一条 `assistant(tool_calls)` + 其后连续 tool 消息）判定，块内工具全部越权则折叠为中性文本。
-折叠文案刻意不带工具名，且按语义类别（检索 / 对比 / 用户偏好）生成 —— 把「读取用户收藏夹」说成「完成了一次信息检索」，会让下一轮 Agent 形成错误认知而跳过应有的检索。**文案失真诱发的幻觉，比泄漏工具名更贵。**
-
-**2. 上下文压缩是事务** —— 先压缩（纯计算）→ 确认确实缩小了 → 才删除前缀并替换 summary。中途任何一步失败都保持原状态。切点从最新消息往回累积 token，只在 user turn 起点切，天然不拆开 `user → assistant(tool_calls) → tool → assistant` 链。摘要撞墙时自压缩摘要，宁可丢叙述性细节也不让压缩整体失效。
-
-**3. HTTP 成功 ≠ 任务成功** —— 拿到 HTTP 200 不算数：内容为空、`finish_reason=length`（被截断）、还挂着 `tool_calls`（模型还想调工具），三者任一都判定为「模型未返回完整有效的最终答复」并降级，不允许把不完整输出当答案交付。
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white" alt="Python" />
+    <img src="https://img.shields.io/badge/Agent-Multi--Agent-6C63FF" alt="Multi-Agent" />
+    <img src="https://img.shields.io/badge/Reasoning-ReAct-0EA5E9" alt="ReAct" />
+    <img src="https://img.shields.io/badge/Retrieval-Dense%20%2B%20BM25-14B8A6" alt="Dense and BM25" />
+    <img src="https://img.shields.io/badge/Vector%20DB-Milvus-3B82F6" alt="Milvus" />
+    <img src="https://img.shields.io/badge/Tests-pytest-0F766E" alt="pytest" />
+  </p>
+</div>
 
 ---
 
-## 快速开始
+## 🎯 项目简介
 
-**唯一必需**：一个 OpenAI 兼容协议的 API Key。其余服务都有降级路径。
+PickWise 是一个面向 3C 消费场景的选购决策助手。它通过 **手写 ReAct 循环与多 Agent 编排**，把需求理解、工具调用、知识检索、上下文记忆和结果整合组织成一条可控制、可评测的执行路径。
 
-### 1. 安装
+它不依赖 LangChain / LangGraph 等 Agent 编排框架。编排逻辑由项目自身实现，并尽量让关键行为具备明确的边界、失败路径和可验证的规则。
+
+> **核心设计：单 Agent 与多 Agent 不是两套模式，而是同一条执行路径的两个特例。** 当任务只需要一个 Agent（N = 1）时直接返回；需要多个 Agent 时，再由 Result Agent 汇总各自回执。
+
+## 🧭 目录导航
+
+- [项目亮点](#-项目亮点) · [系统架构](#-系统架构) · [工程设计](#-三个不那么显然的工程设计)
+- [工具调用安全](#-工具体系与调用安全) · [混合检索](#-检索dense--bm25-混合检索) · [评估体系](#-评估体系)
+- [韧性设计](#-韧性设计明确每一层的责任边界) · [记忆机制](#-记忆机制) · [快速开始](#-快速开始)
+- [项目结构](#-项目结构) · [测试](#-测试) · [技术栈](#-技术栈) · [已知事项](#-已知事项与限制)
+
+## ✨ 项目亮点
+
+| 亮点 | 设计价值 |
+|---|---|
+| 🧭 **统一编排路径** | Router 负责场景判定，Orchestrator 统一调度；N = 1 直返，N > 1 汇总。 |
+| 🛠️ **原生工具调用** | 使用 OpenAI 兼容协议的 function calling；工具 schema 同时服务模型提示与执行前校验。 |
+| 🔎 **混合检索** | Dense 向量检索与 BM25 稀疏检索并行执行，再通过 RRF 融合排名。 |
+| 🧠 **分层记忆** | STM 维护近期交互上下文，LTM 持久化长期事实，并在会话关闭时进行巩固。 |
+| 🛡️ **韧性设计** | 区分瞬时故障与上下文溢出，限制重复工具调用，避免把不完整输出当成最终答案。 |
+| 🧪 **可重复评测** | 规则断言决定用例是否通过；LLM-as-judge 只作参考，测试使用隔离 session 与本地 mock。 |
+
+## 🏗️ 系统架构
+
+```mermaid
+flowchart TD
+    A[用户输入] --> B["ContextPack<br/>历史 · 摘要 · 记忆 · 技能"]
+    B --> C{"Router<br/>LLM 判定场景"}
+    C -->|presale| D["售前 Agent<br/>8 个工具"]
+    C -->|consult| E["咨询 Agent<br/>3 个工具"]
+    C -->|两者| D
+    C -->|两者| E
+    D --> F["Blackboard<br/>单轮回执"]
+    E --> F
+    F --> G{需要汇总吗？}
+    G -->|N = 1| H[直接回复]
+    G -->|N > 1| I[Result Agent 汇总]
+    I --> H
+```
+
+### 一轮请求如何执行
+
+1. **ContextPack**：组合近期历史、摘要、长期记忆与可用技能，为本轮执行准备上下文。
+2. **Router**：根据用户意图判断场景，选择售前 Agent、咨询 Agent，或同时选择两者。
+3. **SubAgent**：沿着手写 ReAct 循环执行推理与工具调用；每个 Agent 只能看到自己的工具白名单。
+4. **Blackboard**：收集各 Agent 的单轮执行回执，包括成功结果或失败信息。
+5. **结果交付**：只运行一个 Agent 时直接返回；多个 Agent 参与时由 Result Agent 汇总已有结果，并如实说明未完成的部分。
+
+## 💡 三个不那么显然的工程设计
+
+### 1. 历史视图投影：不让 Agent 模仿邻居的工具调用
+
+共享历史可能包含其他 Agent 的 `tool_calls`。如果模型看到邻居调用过某工具，可能会模仿调用；但执行层的工具白名单必然拒收，白白消耗额外的 LLM 轮次。
+
+PickWise 会按**完整消息块**处理历史：将一条 `assistant(tool_calls)` 及其后连续的 tool 消息作为整体判定。当块内工具全部越权时，将整块折叠为中性文本，而不是只删除某一条消息。
+
+- 折叠后的文本不暴露具体工具名。
+- 文案按语义类别生成，例如检索、对比或用户偏好。
+- 不把“读取用户收藏夹”模糊描述成“完成信息检索”，避免后续 Agent 误以为必要检索已经完成。
+
+> **工程取舍：文案失真导致的错误认知，可能比工具名泄漏更昂贵。** 因此，历史投影既要隔离工具权限，也要尽可能保留真实语义。
+
+### 2. 上下文压缩是事务，而不是原地删消息
+
+压缩流程遵循“先计算、后提交”的原则：
+
+1. 生成候选摘要，不立即修改原始状态。
+2. 确认压缩结果确实比原上下文更小。
+3. 只有在前两步成功后，才删除被覆盖的历史前缀并替换 summary。
+4. 任一步失败，都保留原状态，避免上下文被破坏。
+
+切点从最新消息向前累积 token，并且只在 user turn 起点切分，避免拆开 `user → assistant(tool_calls) → tool → assistant` 这样的完整调用链。若摘要本身过长，则再次压缩摘要；宁可舍弃部分叙述性细节，也不让压缩失败拖垮整次请求。
+
+### 3. HTTP 200 不代表模型完成了任务
+
+即使 API 返回 HTTP 200，以下情况仍不能视为有效的最终答复：
+
+- 回复内容为空；
+- `finish_reason = length`，表示输出被截断；
+- 响应仍携带 `tool_calls`，表示模型仍希望继续调用工具。
+
+任一条件成立，都视为“模型未返回完整有效的最终答复”，进入对应的降级路径。这样可以避免将空白、不完整或尚未执行完工具调用的内容直接交付给用户。
+
+## 🧰 工具体系与调用安全
+
+PickWise 使用 OpenAI 原生 function calling，并以 `TOOL_DEFINITIONS` 作为 schema 单一事实来源：
+
+```text
+TOOL_DEFINITIONS
+      │
+      └── 派生 → _SCHEMA_MAP → 执行前参数校验
+      │                            │
+      └── 提供给模型的工具说明 ────┘
+```
+
+模型看到的工具定义和执行层的参数约束来自同一份 schema，减少“模型以为可以调用、执行层却按另一套规则校验”的契约漂移。参数不符合契约时，错误会回馈给模型，让它尝试修正，而不是直接结束任务。
+
+### 三道闸门
+
+| 顺序 | 闸门 | 作用 |
+|---|---|---|
+| ① | **协议层** | 解析 JSON，检查工具参数能否被正确读取。 |
+| ② | **契约层** | 依据 schema 校验参数与字段约束。 |
+| ③ | **重复调用熔断** | 同一参数签名第 3 次调用时拦截，并提示模型更换查询条件或基于现有信息作答。 |
+
+重复调用签名使用参数归一化后的稳定 JSON 计算，因此仅把参数从 `"10"` 改写成 `10`，不能绕过熔断。参数归一化与签名的实际实现以代码为准。
+
+### Agent 工具白名单
+
+| Agent | 场景 | 可用工具数 |
+|---|---|---:|
+| `presale` | 售前选购 | 8 |
+| `consult` | 售前咨询 | 3 |
+
+工具权限通过**按 Agent 裁剪 function schema** 实现硬隔离，而不是依靠 prompt 请求模型自觉遵守。上表表示各 Agent 的可用工具规模，不代表两组工具一定完全不重叠。
+
+## 🔍 检索：Dense + BM25 混合检索
+
+知识库与商品库均使用 Milvus 混合检索，并在服务端通过 Reciprocal Rank Fusion（RRF）融合稀疏与稠密检索的排名。
+
+```mermaid
+flowchart LR
+    Q[原始查询] --> S["BM25 稀疏检索<br/>服务端 jieba 分词"]
+    Q --> E[Embedding]
+    E --> D["Dense 向量检索<br/>COSINE"]
+    S --> R[RRF 排名融合]
+    D --> R
+    R --> O[候选结果]
+```
+
+**为什么 BM25 使用原始查询？** 只有 retriever 层同时持有查询原文和 embedder，因此原文透传放在 retriever 层处理，而不额外耦合到更上层的编排代码。
+
+**为什么生产检索与评测共用实现？** 让真实请求和检索评测经过同一条检索路径，减少“离线测的是一套逻辑、生产跑的是另一套逻辑”的偏差。
+
+默认使用 **Milvus Lite**，数据存储在本地 `.db` 文件中，无需单独部署服务；需要切换到 Milvus Standalone 时，可通过配置 URI 切换。具体配置项以 `.env.example` 和 `app/config/settings.py` 为准。
+
+## 🧪 评估体系
+
+> **规则断言决定通过与否，LLM-as-judge 只提供参考。**
+
+`CaseResult.passed` 只由确定性规则决定。评审模型输出可能存在波动，不应成为自动化评测的最终开关。
+
+### 评测数据集：共 231 条用例
+
+| 数据集 | 数量 | 覆盖内容 |
+|---|---:|---|
+| `cases.json` | 20 | 端到端流程，含多轮指代消解 |
+| `router_cases.json` | 55 | 场景路由，包含 group / difficulty 维度 |
+| `rag_cases.json` | 152 | 检索质量，仅使用人工审核的标注 |
+| `cases_isolation.json` | 4 | 工具白名单泄漏探针 |
+| **合计** | **231** | — |
+
+### 运行评测
 
 ```bash
-git clone https://github.com/YW216/PickWise.git
-cd PickWise
+# 端到端评测（20 条）
+python app/scripts/run_eval.py
 
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+# Router 专项评测（55 条）
+python app/scripts/run_router_eval.py
 
-pip install -r requirements.txt
-pip install langfuse pytest                        # 见下方「关于依赖」
+# RAG 检索评测：Hit@K / MRR / Recall@K
+python app/scripts/run_rag_eval.py --top-k 5
+
+# 判分器自检
+python app/scripts/run_eval.py --self-test
 ```
 
-### 2. 配置
+### 评测设计中的关键约束
+
+- **Sandbox 隔离**：每条用例使用独立临时 session，关闭记忆读写，防止历史长期记忆注入 prompt 干扰评分；关闭 MCP，仅使用本地 mock，保证 ground truth 可控。
+- **不修改生产代码**：通过对共享的 `chat.completions.create` 打 monkey-patch 实现插桩，而不是为了评测改写生产路径。
+- **判分器自身也要被测**：`--self-test` 构造含伪造 ID 或伪造价格的回复轨迹，检查判分器能否正确拒绝。
+- **量化幻觉防御**：`valid_ids_only` 检查 ID 是否来自真实目录；`reply_prices_in_catalog` 检查回复价格是否存在于商品目录。
+- **评测运行韧性**：`runtime` 断言避免把服务故障时的兜底文本算成成功的推荐答案。
+
+## 🛡️ 韧性设计：明确每一层的责任边界
+
+| 层级 | 负责 | 不负责 |
+|---|---|---|
+| SDK / HTTP | 超时、重试、退避 | 执行本地写操作 |
+| Router | 瞬时故障时回退默认场景 | 保证降级后仍完整完成推荐 |
+| SubAgent | 只接受非空且未截断的答复 | 把代码异常伪装成正常答案 |
+| Result Agent | 整合已有成果 | 编造失败 Agent 未成功取得的结果 |
+| 入口层 | 接纳结果、对失败轮次补答 | 因记忆或保存失败覆盖已经生成的答案 |
+
+### 部分失败，不等于整体失败
+
+- 单 Agent 任务失败时，直接将失败向上抛出。
+- 多 Agent 任务中，失败记录写入 Blackboard，由 Result Agent 根据已有成果如实说明未完成部分。
+- 故障 Agent 不做无意义的重复调用。
+- 只有 `overflow` 子集会在上下文压缩成功后重试一次；如果压缩未能缩小上下文，则不重复执行同样大小的请求。
+
+### 两类异常，分别处理
+
+异常识别采用两个相互独立的维度：
+
+- `is_transient`：连接错误、超时、限流和 5xx 等瞬时故障。
+- `is_context_overflow`：`context_length_exceeded` 等上下文长度问题。
+
+两类异常都收窄识别范围，遵循“宁可漏判，也不误判”的原则。参数错误不是上下文溢出，压缩无法修复参数错误；连接中断也不应默认触发上下文压缩。
+
+## 🧠 记忆机制
+
+PickWise 将短期上下文与长期记忆分开管理：
+
+| 维度 | STM（短期记忆） | LTM（长期记忆） |
+|---|---|---|
+| 存储 | 进程内存 | 本地 JSON 文件 |
+| 主要用途 | 保留近期对话上下文 | 巩固用户事实与长期偏好 |
+| 更新时机 | 每轮成功后更新 | 会话关闭时巩固 |
+| 边界 | 只保留最近 6 条消息 | 原子写入；提取失败不影响已生成的回答 |
+
+记忆用于辅助后续交互，不应成为覆盖本轮有效答案的故障源。具体保留窗口与巩固时机如有调整，以实际配置和实现为准。
+
+## 🚀 快速开始
+
+### 环境要求
+
+- Python 环境（请按项目实际依赖选择兼容版本）
+- 一个支持 OpenAI 兼容协议的 LLM API Key
+- 可用的 Embedding 服务：当主模型服务不提供 embedding 接口时，需要单独配置
+
+除 LLM API 外，其他基础设施尽可能提供降级路径。Milvus 默认可使用本地 Milvus Lite；PostgreSQL 和 Langfuse 为可选服务，但当前版本的 Python 依赖有额外注意事项，详见下文。
+
+### 1. 克隆仓库并安装依赖
+
+```bash
+git clone https://github.com/YW216/pickwise.git
+cd pickwise
+
+python -m venv .venv
+
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows PowerShell 可使用：
+# .venv\Scripts\Activate.ps1
+
+pip install -r requirements.txt
+
+# 当前 requirements.txt 未声明，但启动 / 测试需要单独安装
+pip install langfuse pytest
+```
+
+### 2. 配置环境变量
+
+复制配置模板后，请先检查并移除 `Settings` 未声明的键，再填入自己的凭据：
 
 ```bash
 cp .env.example .env
 ```
 
-最小配置（其余全部有默认值）：
+示例配置如下（请按实际模型服务修改）：
 
 ```ini
-OPENAI_API_KEY=sk-你的key
+OPENAI_API_KEY=sk-你的模型服务密钥
 OPENAI_BASE_URL=https://api.deepseek.com
 MODEL_NAME=deepseek-v4-flash
 
-EMBEDDING_API_KEY=sk-你的embeddingkey
+# 检索所需的 Embedding 服务
+# DeepSeek 官方不提供 embedding 接口；此处示例使用 SiliconFlow
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_API_KEY=sk-你的Embedding服务密钥
 EMBEDDING_MODEL=BAAI/bge-m3
 ```
 
-> ⚠️ **不要照抄 `.env.example` 里所有键**。本项目 `Settings` 用 pydantic-settings 的 `extra_forbidden`，`.env` 里出现**未声明的键会让整个配置加载失败**。`.env.example` 中 `RAG_BACKEND`、`KB_INDEX_PATH`、`CHROMA_PERSIST_DIR`、`CHROMA_COLLECTION`、`MULTI_AGENT_ENABLED` 属于历史遗留，删掉即可。
+> ⚠️ **配置注意**：`Settings` 使用 `pydantic-settings` 的 `extra_forbidden`。如果 `.env` 包含未声明的键，配置加载可能整体失败。不要未经检查就照抄模板中的所有变量。
 
-### 3. 运行
+### 3. 启动交互式会话
 
 ```bash
 python main.py
 ```
 
-交互式会话，支持 4 个内置命令：
+交互式命令：
 
-| 命令 | 作用 |
+| 命令 | 功能 |
 |---|---|
-| `skills` | 列出已加载技能 |
-| `memory` | 查看短期 / 长期记忆原文 |
-| `reset` | 重置对话 |
-| `quit` / `exit` | 退出（自动落盘会话与记忆） |
+| `skills` | 列出可用技能 |
+| `memory` | 查看记忆原文 |
+| `reset` | 重置当前会话 |
+| `quit` | 退出程序 |
 
----
+### 外部服务：哪些是必需的？
 
-## 外部服务：全部可选
-
-| 服务 | 用途 | 必需 | 不配会怎样 |
-|---|---|---|---|
-| **LLM API** | 推理 | ✅ **必需** | 无法启动 |
-| **Milvus** | 向量检索 | 功能必需 | 默认走 **milvus-lite**（本地 `.db` 文件），**零部署** |
-| **PostgreSQL** | 商品真值层 | 可选 | 回退本地 JSON 数据文件 |
-| **Langfuse** | 调用链追踪 | 可选 | 全链路 no-op |
-
-**开发环境开箱即用**，因为默认就是 milvus-lite。需要 standalone 时改一个配置项即可，同一套代码：
-
-```ini
-MILVUS_URI=http://localhost:19530      # 本地文件 → standalone 服务
-```
-
-Milvus 服务端用官方的独立 compose（`milvus standalone + etcd + minio`），PostgreSQL 在另一个 compose 里，两者**刻意不合并**——真值层与检索层分离，真值变更后重建索引即可。
-
----
-
-## 工具体系
-
-8 个工具，**OpenAI 原生 function calling**，schema 单源：
-
-```
-TOOL_DEFINITIONS ──派生──→ _SCHEMA_MAP ──→ 执行前参数闸门
-     │                        │
-     └──── 给模型看的说明书 ←──┘ 同一份
-```
-
-校验器反读 schema 约束做拦截，模型看到的与执行层校验的永远同源，不会漂移。参数不合契约时**回喂给模型自己改**，而不是直接报错终止。
-
-三道闸门按序收口：协议层 JSON 解析 → 契约层 schema 校验 → **重复调用熔断**（同一签名的工具第 3 次调用被拦下，返回「换查询条件或基于现有信息作答」这类可操作提示，而不是硬失败）。
-
-熔断签名按参数归一化后的稳定 JSON 计算，所以模型换个写法（`"10"` vs `10`）绕不过去。
-
----
-
-## 检索：dense + BM25 混合
-
-知识库与商品库都走 Milvus 混合检索，**服务端 RRF 按排名融合**：
-
-```
-query 原文 ──────────────→ BM25 稀疏路（服务端 jieba 分词建索引）
-         └→ Embedding ──→ dense 路（COSINE）
-                              ↓
-                        RRFRanker融合
-```
-
-原文一路直通 BM25 这一步是刻意的：只有 retriever 层同时持有原文和 embedder，所以透传放在这一层而非上层。混合检索的生产路径与评测路径共用同一实现，保证评测结果不分叉。
-
-知识库与商品库分两个collection：语义域不同（问答vs 商品卡片），更新节奏也不同。
-
----
-
-## 评估体系
-
-**双层设计：规则断言判生死，LLM-as-judge 只参考。**
-
-`CaseResult.passed` **只看规则**，judge 打分完全不影响通过判定。这样做是为了让门禁稳定可复现 —— 评审模型的输出天然有抖动，不能拿它当开关。
-
-### 跑起来
-
-```bash
-python app/scripts/run_eval.py# 端到端，20 条
-python app/scripts/run_eval.py --case-id <id>     # 单条调试
-python app/scripts/run_eval.py --self-test       # 判分器自检
-python app/scripts/run_router_eval.py            # Router 专项，55 条，可设门禁退出码
-python app/scripts/run_rag_eval.py --top-k 5     # 检索 Hit@K / MRR / Recall@K
-```
-
-### 用例集（共 231 条）
-
-| 数据集 | 条数 | 用途 |
+| 服务 | 是否必需 | 未配置时的行为 |
 |---|---|---|
-| `cases.json` | 20 | 端到端（含多轮指代消解） |
-| `router_cases.json` | 55 | Router 场景判定，带 `group` / `difficulty` 维度 |
-| `rag_cases.json` | 152 | 检索质量，只取人工审核过的标注 |
-| `cases_isolation.json` | 4 | 工具白名单泄漏探针 |
+| **LLM API** | ✅ 必需 | 无法完成推理与生成；入口会显式报告缺失配置。 |
+| **Embedding API** | ⚠️ 检索必需 | 无法执行需要向量嵌入的检索。若主模型服务不支持 Embedding，必须单独配置。 |
+| **Milvus** | 检索功能必需 | 默认使用 Milvus Lite 本地文件模式，无须单独部署 Milvus 服务。 |
+| **PostgreSQL** | 可选 | 回退到本地 JSON 数据文件。 |
+| **Langfuse** | 可选功能 | 追踪功能退化为 no-op；但目前 `orchestrator.py` 存在强 import，因此运行环境仍需安装 `langfuse`。 |
+| **MCP 服务端** | 当前不启用 | 服务端已暂停，当前走本地工具路径。 |
 
-端到端用例支持多轮（`turns`），`expected_route` 支持 `"presale|consult"` 表示两者皆可。
+## 📁 项目结构
 
-### 两个值得单说的地方
-
-**Sandbox 隔离**：每条用例独立临时 session、**关闭记忆读写**（否则历史 LTM 会注入 prompt 污染评分）、关闭 MCP只用本地 mock 保证 ground truth 确定。插桩只给共享的 `chat.completions.create` 打 monkey-patch，不改生产代码一行。
-
-**判分器自己也被测**：`--self-test` 会构造「回复含伪造ID / 伪造价格」的轨迹，断言判分器必须能抓出来。判分器不可信则整个评估体系无意义。
-
-### Judge 的防抖动设计
-
-温度固定 0 + rubric 版本号锁定 + 强制 JSON 输出，解析失败重试一次，再失败返回「未判」而非打假分。未判样本原始输出落盘，并按 `finish_reason` 区分`length`（该加预算）与 `stop`（该改 prompt）—— 两类问题的修法完全不同。
-
----
-
-## 韧性设计
-
-### 职责边界
-
-| 层级 | 负责 | **不**负责 |
-|---|---|---|
-| SDK HTTP | 超时 / 重试 / 退避 | 执行本地写工具 |
-| Router | 瞬时故障退回默认场景 | 保证降级后仍完整完成推荐 |
-| SubAgent | 只接受非空且未截断的答复 | 把代码异常伪装成正常答案 |
-| Result | 整合已有成果 | **编造**未成功 Agent 的答案 |
-| 入口 | 接纳 / 失败轮补答 | 因记忆或保存失败覆盖已生成的答案 |
-
-**部分失败不整体失败**：单 Agent 失败直接抛错；多 Agent 失败则记黑板、由 Result 如实告知。故障 Agent 不重复调用，只有 `overflow` 子集在压缩成功后重试一次（压不动就不重跑，上下文一样大必然二次溢出）。
-
-### 异常分类按两个正交维度
-
-`is_transient`（连接 / 超时 / 限流 / 5xx）与 `is_context_overflow`（`context_length_exceeded`）刻意分开，且都收窄识别范围 —— **宁可漏判也不误判**。混为一谈会出事：400 参数错误压缩无用，连接中断压缩也无用。
-
-### 一条安全边界
-
-LLM HTTP 重试**不会执行本地写工具**。写工具需要业务幂等与执行记录，**不能把「关闭 LLM 重试」当作避免重复下单 / 退款的充分条件**。
-
----
-
-## 项目结构
-
-```
-app/
-├── multi_agent/        编排层
-│   ├── orchestrator.py     唯一编排器
-│   ├── router.py           LLM 场景判定 + 固定顺序重排
-│   ├── agents.py           轻量 ReAct SubAgent
-│   ├── context_pack.py     共享上下文 + 历史视图投影
-│   └── blackboard.py       单轮回执收集
-├── agent/     能力层（无编排）
-│   ├── compaction.py       上下文压缩（纯函数）
-│   ├── context_budget.py   token 预算 / 异常分类
-│   ├── product_tracker.py  商品记忆
-│   ├── tools/              8 个工具 + schema + 校验闸门
-│   ├── memory/             STM / LTM + LLM 事实提取
-│   ├── rag/                Milvus 混合检索
-│   └── skills/             SKILL.md 流程加载
-├── evaluation/  评估（sandbox / metrics / judges / reporter）
-├── config/settings.py      pydantic-settings
-└── scripts/                三个评测入口
-
-main.py                 CLI 入口
-tests/                13 个 pytest + 10 个 verify 脚本
-deploy/                  Milvus / PostgreSQL compose（gitignore）
+```text
+pickwise/
+├── main.py
+├── app/
+│   ├── multi_agent/             # 编排层
+│   │   ├── orchestrator.py      # 统一编排入口
+│   │   ├── router.py            # LLM 场景判定与执行顺序整理
+│   │   ├── agents.py            # 轻量 ReAct SubAgent
+│   │   ├── context_pack.py      # 共享上下文与历史视图投影
+│   │   └── blackboard.py        # 收集单轮 Agent 回执
+│   ├── agent/                   # 能力层，不负责多 Agent 编排
+│   │   ├── compaction.py        # 上下文压缩
+│   │   ├── context_budget.py    # token 预算与异常分类
+│   │   ├── tools/               # 工具定义、schema 与校验闸门
+│   │   ├── memory/              # STM / LTM 与事实提取
+│   │   ├── rag/                 # Milvus 混合检索
+│   │   └── skills/              # SKILL.md 流程加载
+│   ├── evaluation/              # sandbox、指标、判分与报告
+│   ├── config/settings.py       # pydantic-settings 配置
+│   └── scripts/                 # 评测入口
+├── tests/                       # 自动化测试
+├── requirements.txt
+└── README.md
 ```
 
-`app/multi_agent/` 是编排，`app/agent/` 是能力，两层职责不重叠。
+> 上述目录树是按项目职责整理的阅读导航。实际文件名或目录若与当前分支不一致，请以仓库内容为准。
 
-### 记忆
+**架构分层原则：编排层决定“谁来做、按什么顺序做”；能力层提供“具体怎么做”的工具、记忆与检索能力。** 两者职责分离，减少模块间的职责重叠。
 
-| | 存储 | 更新时机 |
-|---|---|---|
-| **STM** 短期 | 内存 + session 文件恢复 | 每轮成功后，只看最近 6 条消息 |
-| **LTM** 长期 | `{memory_dir}/{user_id}.json`，原子写入 | **会话关闭时**才巩固 |
-
-LTM 注入时附带最近 3 条交互摘要。STM 提取失败不影响已生成的答案，LTM 提取失败不阻止资源清理 —— **附属工作永远不能覆盖主答复**。
-
----
-
-## 测试
+## ✅ 测试
 
 ```bash
 pytest tests/ -v
 ```
 
-**刻意完全离线**，不烧 token、不访问外网：`test_resilience.py` 用假 client 注入故障，`test_llm_transport.py` 用 `httpx.MockTransport`，`test_evaluation.py` 不调 LLM。故障降级路径要能测，就不能依赖真调用。
+自动化测试刻意保持离线：不消耗真实模型 token，也不依赖外部网络。
 
-另有 10 个 `verify_*.py` 脚本是真调 LLM / Milvus 的端到端手工验证，需手动执行。
+- `test_resilience.py` 使用假 client 注入故障，验证降级路径。
+- `test_llm_transport.py` 使用 `httpx.MockTransport` 模拟 HTTP 交互。
+- 另有若干 `verify_*.py` 脚本会真实调用 LLM / Milvus，属于手动端到端验证，执行前请确认服务和凭据已配置。
+- `tests/test_multi_agent.py` 是脚本式断言，不属于标准 pytest 收集的测试用例。
+
+可离线验证的故障路径，才适合纳入可重复测试；生产依赖不可用时，不应该成为单元测试无法运行的理由。
+
+## 🧱 技术栈
+
+| 层级 | 组件 / 方案 | 用途 |
+|---|---|---|
+| Agent 编排 | 自研 Python 编排、手写 ReAct、`ThreadPoolExecutor` | 任务路由与协作；不依赖 LangChain / LangGraph |
+| 模型接口 | `openai` SDK（OpenAI 兼容协议） | LLM 推理、生成与 function calling |
+| Embedding | `BAAI/bge-m3`（可配置兼容服务） | 检索向量生成 |
+| 检索 | Milvus + BM25 + Dense + RRF | 混合检索与排名融合 |
+| 配置与校验 | Pydantic v2、`pydantic-settings` | 类型校验与配置管理 |
+| 追踪 | Langfuse（可选） | 链路与调用观察 |
+| 数据 | PostgreSQL（可选）与本地 JSON | 持久化与降级存储 |
+| 测试 | pytest、`unittest.mock`、`httpx.MockTransport` | 离线验证与故障注入 |
+
+## ⚠️ 已知事项与限制
+
+- **凭据不硬编码**：密钥配置不设默认值，由 `.env` 或环境变量注入。缺少凭据时，在调用入口通过 `assert_openai_configured()` / `assert_embedding_configured()` 显式报错，而不是在 import 阶段崩溃。
+- **Embedding 凭据回退有条件**：`EMBEDDING_*` 留空时可回退到主模型配置，但仅当主服务实际提供兼容的 Embedding 接口时成立。若使用不提供 Embedding 的模型服务，需要配置独立的 Embedding API。
+- **依赖声明尚需补齐**：当前 `requirements.txt` 未声明 `langfuse` 和 `pytest`；启动应用与执行测试前需单独安装。
+- **`.env.example` 需要核对**：配置使用 `extra_forbidden`，未声明变量可能导致整个配置加载失败。
+- **MCP 服务端已暂停**：`mcp_server/server.py` 当前仅保留注释，客户端代码就绪，但现阶段执行路径降级为本地工具。
+- **非 pytest 风格测试**：`tests/test_multi_agent.py` 使用脚本式断言，不会被 pytest 自动收集。
+- **学习期草稿不属于应用入口**：根目录 `agentdemo.py`、`test.py`、`wtest.py` 是 function calling / 装饰器实验草稿；其中 `agentdemo.py` 当前不可运行。
+
+## 🗺️ 规划方向
+
+- [ ] 补齐运行与测试依赖声明，减少首次安装时的额外步骤。
+- [ ] 清理并校验 `.env.example`，让配置模板与 `Settings` 字段保持一致。
+- [ ] 持续完善 Router、RAG 与端到端评测集。
+- [ ] 扩大故障注入覆盖范围，持续验证部分失败与上下文溢出路径。
+- [ ] 恢复或重新设计 MCP 服务端集成方案。
+
+## 🤝 贡献
+
+欢迎通过 Issue 反馈问题、提出改进建议，或提交 Pull Request。涉及架构变更时，建议附上设计理由、测试方式与相应的评测结果。
+
+## 📄 许可证
+
+请以仓库中的 `LICENSE` 文件为准。如果仓库尚未添加许可证，请在发布前明确项目的授权方式。
 
 ---
 
-## 技术栈
-
-| 层 | 选型 |
-|---|---|
-| 编排 | **自研**（手写 ReAct + ThreadPoolExecutor，零 Agent 框架） |
-| LLM | `openai` SDK（OpenAI 兼容协议，实接 DeepSeek v4-flash） |
-| Embedding | `BAAI/bge-m3`（可切任意 OpenAI 兼容服务） |
-| 向量库 | Milvus（milvus-lite / standalone 同构切换）+ BM25 + RRF |
-| 数据 | PostgreSQL 16（可选） |
-| 追踪 | Langfuse（可选，wrapt 类级补丁） |
-| 校验 | pydantic v2 + pydantic-settings |
-| 测试 | pytest + `unittest.mock` + `httpx.MockTransport` |
-
-**7 个直接依赖**，没有 LangChain / LangGraph / LlamaIndex。
-
----
-
-## 已知事项
-
-- **凭据零硬编码** —— 所有密钥字段在 `settings.py` 中一律无默认值，由 `.env` / 环境变量注入。缺凭据时不会在 import 期崩溃（那会让离线单测全部无法收集），而是在真正调用 LLM 的入口显式抛出可操作报错：`assert_openai_configured()` / `assert_embedding_configured()`。
-- **Embedding 凭据回退** —— `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` 留空时回退到主模型配置，由 `settings.effective_embedding_*` 三个属性统一收口（调用方只读这三个）。注意**回退仅在主模型 provider 确实提供 embedding 端点时成立**：DeepSeek 官方不提供（实测 404），所以用 DeepSeek 做主模型时这两项必须显式配置，否则会在配置期被 `assert_embedding_configured()` 拦下。
-- **`.env.example` 已清理失效键** —— `RAG_BACKEND`、`CHROMA_*`、`KB_INDEX_PATH`、`MULTI_AGENT_ENABLED` 在代码中已无对应字段（向量库已统一切到 Milvus，单/多 Agent 双模式已合并），保留它们会因 `extra_forbidden` 让配置加载失败。
-- **`requirements.txt` 未声明 `langfuse` 与 `pytest`** —— `langfuse` 在 `orchestrator.py` 是强 import，不装无法启动；`pytest` 是跑测试的前提。两者需单独安装。
-- **MCP 服务端已暂停** —— `mcp_server/server.py` 只剩注释，客户端代码就绪但服务端工具已下线，当前降级使用本地工具。
-- **根目录 `agentdemo.py` / `test.py` / `wtest.py`** 是学习期function calling 与装饰器的草稿，不属于应用，`agentdemo.py` 本身无法运行。
-- **`tests/test_multi_agent.py`** 是脚本式断言（非 pytest 风格），不被 pytest 收集。
-- **`tests/test_evaluation.py::test_rule_content_checks` 当前失败** —— `ValueError: max() arg is an empty sequence`，属存量 bug（与配置改造无关），公开前建议修掉。
+<div align="center">
+  <strong>PickWise</strong><br />
+  <sub>理解需求 · 检索信息 · 协同推理 · 辅助决策</sub>
+</div>
