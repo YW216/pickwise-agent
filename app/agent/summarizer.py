@@ -19,9 +19,9 @@ def summarize(
 
     支持 user / assistant / tool 以及含 tool_calls 的 assistant 消息。
     """
-    parts: list[str] = ["<conversation>"]
+    test2_parts: list[str] = ["<conversation>"]
     if prev_summary:
-        parts.append(f"<previous-summary>\n{prev_summary}\n</previous-summary>")
+        test2_parts.append(f"<previous-summary>\n{prev_summary}\n</previous-summary>")
 
     transcript_lines = []
     for msg in old_messages:
