@@ -54,8 +54,9 @@ _retest.log
 待办任务.md
 _tmp_*.py
 _cleanup_backup/
-项目学习文档/
 report/
 sql/
 test.py
 wtest.py
+_tmp_measure_saving.py
+demo/
