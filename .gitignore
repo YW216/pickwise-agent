@@ -47,3 +47,8 @@ _e2e.log
 _retest.log
 .workbuddy/tmp/
 .workbuddy
+
+# 个人工作笔记（2026-10-08 公开仓库前清理：文件保留本地，不再提交）
+待办任务.md
+_tmp_*.py
+_cleanup_backup/

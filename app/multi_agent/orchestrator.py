@@ -22,7 +22,6 @@ from app.agent.context_budget import (
     estimate_messages_tokens,
     estimate_text_tokens,
     estimate_tool_definitions_tokens,
-    is_context_overflow,
     is_transient,
 )
 from app.agent.product_tracker import format_products_block, merge_products
@@ -204,23 +203,31 @@ class MultiAgentOrchestrator:
     def _chat_inner(self, user_input: str) -> str:
         """只完成路由、专家执行和最终回复提交；记忆/持久化在 chat 外层处理。"""
         pack = self._build_pack()
+        # 压缩只针对专家 Agent 的上下文预算（_estimate_context_tokens 估的是
+        # build_working_messages + 工具 schema），供后面的专家执行准备。
         if self._try_compact(pack):
             pack = self._build_pack()
-        # SDK 已负责 HTTP 重试；这里最多一次压缩补救，不再叠加传输重试。
-        for attempt in range(2):
-            try:
-                scenarios = self.router.route(user_input, pack.history, summary=pack.summary)
-                break
-            except Exception as exc:
-                overflow = isinstance(exc, ContextOverflowError) or is_context_overflow(exc)
-                if overflow and attempt == 0 and self._try_compact(pack, force=True):
-                    pack = self._build_pack()
-                    continue
-                if is_transient(exc):
-                    # 默认咨询可能不能完成推荐诉求：明确记为降级，而不是无损成功。
-                    self._record_failure("router", exc)
-                    scenarios = [DEFAULT_SCENARIO]
-                    break
+        # 路由不再做"强制压缩重试"（2026-10-08 移除，理由见下）。
+        #
+        # 为什么不重试：Router 根本不读完整历史——它只收「最近 4 条
+        # user/assistant（每条 ≤300 字）+ 历史摘要 + 当前输入」，工具结果
+        # 完全不进 Router。所以专家上下文变小 ≠ Router 输入变小：
+        # 强制压缩多半只是删掉 Router 原本就看不到的消息、同时把摘要换长，
+        # 未必缓解 Router 超限，纯属无效功。
+        #
+        # 保留前面的主动压缩：那是给专家 Agent 用的，与路由无关。
+        # 若 Router 真出现超限，正确的做法是限制**它自己**的输入预算
+        # （收紧最近条数/摘要长度），而不是拿专家上下文间接补救。
+        #
+        # SDK 已负责 HTTP 层重试，这里不再叠加传输重试，只做瞬时故障降级。
+        try:
+            scenarios = self.router.route(user_input, pack.history, summary=pack.summary)
+        except Exception as exc:
+            if is_transient(exc):
+                # 默认咨询可能不能完成推荐诉求：明确记为降级，而不是无损成功。
+                self._record_failure("router", exc)
+                scenarios = [DEFAULT_SCENARIO]
+            else:
                 raise
         mode = "single" if len(scenarios) == 1 else "multi"
         names = "、".join(AGENT_CONFIGS[k]["name"] for k in scenarios)

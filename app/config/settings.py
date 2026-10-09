@@ -7,7 +7,13 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """项目配置，从 .env 文件读取"""
 
-    openai_api_key: str = "sk-d57ce02289534f07a9829a007b10b3b4"
+    # 无默认值：密钥类字段一律留空，由 .env / 环境变量注入。
+    # 历史教训——这里曾硬编码过一个真实 API Key 并随 commit 进入 git 历史，
+    # 公开仓库一旦 push 即可被挖出。故所有凭据字段禁止写默认值。
+    # 空串的实际影响由使用点承担：需要凭据的地方（见 assert_*_configured）显式报错，
+    # 不需要凭据的地方（纯离线单测、工具 schema 校验）照常工作——
+    # 若改成 pydantic 必填校验，13 个 pytest 文件会在无 .env 环境下集体导入失败。
+    openai_api_key: str = ""
     openai_base_url: str = "https://api.deepseek.com"
     model_name: str = "deepseek-v4-flash"
     temperature: float = 0.7
@@ -119,6 +125,26 @@ class Settings(BaseSettings):
 
     # protected_namespaces 置空：允许 model_name 等 model_ 前缀字段（消除 pydantic v2 警告）
     model_config = {"env_file": ".env", "protected_namespaces": ()}
+
+    # ---------- 凭据完整性检查（2026-10-09）----------
+    # 为什么放在这里而不是用 pydantic 必填校验：Settings 在 import 期实例化，
+    # 必填字段会让无 .env 的场景（CI 跑离线单测、只读 schema 的工具校验）
+    # 直接 ImportError。改成显式断言——用不到的路径不受影响，用得到的路径给出可操作的报错。
+    _MISSING_CREDENTIAL = "缺失，请在 .env 中配置 {key}（参考 .env.example）"
+
+    def assert_openai_configured(self) -> None:
+        """需要调用主 LLM 时使用：确认主模型凭据已配置。"""
+        if not self.openai_api_key:
+            raise RuntimeError(
+                self._MISSING_CREDENTIAL.format(key="OPENAI_API_KEY")
+            )
+
+    def assert_embedding_configured(self) -> None:
+        """需要向量化时使用：embedding 凭据留空则回退主模型凭据。"""
+        if not self.embedding_api_key and not self.openai_api_key:
+            raise RuntimeError(
+                self._MISSING_CREDENTIAL.format(key="EMBEDDING_API_KEY")
+            )
 
 
 settings = Settings()

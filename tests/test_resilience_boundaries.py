@@ -96,18 +96,44 @@ def test_router_transient_fallback_really_executes_default(orch):
     assert orch._execute_agents.call_args.args[0] == [DEFAULT_SCENARIO]
 
 
-def test_router_overflow_then_transient_can_still_degrade(orch):
+def test_router_overflow_propagates_without_retry(orch):
+    """Router 溢出**直接上抛**，不做强制压缩重试（2026-10-08 设计变更）。
+
+    为什么不重试：Router 只读「最近 4 条 user/assistant（每条 ≤300 字）+
+    摘要 + 当前输入」，工具结果完全不进 Router。专家上下文压缩变小 ≠ Router
+    输入变小——强制压缩多半只是删掉 Router 原本就看不到的消息、同时把摘要
+    换长，未必缓解超限。
+    Router 真超限时正确的补救是限制它自己的输入预算（收紧最近条数/摘要长度），
+    而不是拿专家上下文间接补救。
+    """
     import httpx
-    from openai import APIConnectionError, BadRequestError
+    from openai import BadRequestError
+
     request = httpx.Request("POST", "https://test.invalid/chat")
     overflow = BadRequestError(
         "maximum context length exceeded", response=httpx.Response(400, request=request),
         body={"code": "context_length_exceeded"},
     )
-    orch.router.route.side_effect = [overflow, APIConnectionError(request=request)]
-    orch._try_compact = Mock(side_effect=[False, True])
+    orch.router.route.side_effect = overflow
+
+    reply = orch.chat("question")
+
+    # 调用一次就够——不再有「压缩后重试」的第二轮
+    assert orch.router.route.call_count == 1
+    # 非瞬时故障不降级，交给 chat() 出口兜底
+    assert "暂时不可用" in reply or "无法访问" in reply
+    assert orch._execute_agents.call_count == 0, "溢出时不应进入专家执行"
+
+
+def test_router_transient_still_degrades_without_extra_compact(orch):
+    """瞬时故障仍降级到默认场景，且不触发任何额外压缩尝试。"""
+    from openai import APIConnectionError
+
+    orch.router.route.side_effect = APIConnectionError(request=None, message="network")
+    orch._try_compact = Mock(side_effect=[False])  # 只有主动压缩那一次
+
     assert orch.chat("question") == "valid answer"
-    assert orch.router.route.call_count == 2
+    assert orch.router.route.call_count == 1
     assert orch._execute_agents.call_args.args[0] == [DEFAULT_SCENARIO]
 
 
