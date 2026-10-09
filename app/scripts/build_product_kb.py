@@ -83,10 +83,11 @@ def main():
         print(f"   - {pid}: {p['name']}")
 
     print(f"\n[2/3] 调用 {settings.embedding_model} 批量向量化...")
+    settings.assert_embedding_configured()
     embedder = Embedder(
-        api_key=settings.embedding_api_key,
-        base_url=settings.embedding_base_url,
-        model=settings.embedding_model,
+        api_key=settings.effective_embedding_api_key,
+        base_url=settings.effective_embedding_base_url,
+        model=settings.effective_embedding_model,
         timeout=settings.openai_timeout,
         max_retries=settings.openai_max_retries,
     )

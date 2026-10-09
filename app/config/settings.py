@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
 
     # RAG 配置（第5期）
-    # Embedding 服务可独立配置（如硅基流动 SiliconFlow），留空则复用 openai_base_url/openai_api_key
+    # Embedding 服务可独立配置（如硅基流动 SiliconFlow）。
+    # 三项各自留空时回退到主模型配置——由 effective_embedding_* 三个属性统一收口，
+    # 调用方只读那三个，不要直接读这里的原始字段。
     embedding_model: str = "BAAI/bge-m3"
     embedding_base_url: str = ""
     embedding_api_key: str = ""
@@ -132,6 +134,34 @@ class Settings(BaseSettings):
     # 直接 ImportError。改成显式断言——用不到的路径不受影响，用得到的路径给出可操作的报错。
     _MISSING_CREDENTIAL = "缺失，请在 .env 中配置 {key}（参考 .env.example）"
 
+    # ---------- Embedding 凭据回退（2026-10-09）----------
+    # 为什么需要：早期注释声称「留空则复用 openai_base_url/openai_api_key」，
+    # 但 Embedder 构造处是`api_key=settings.embedding_api_key` 直接传值，
+    # 空串会被原样送进 OpenAI 客户端 → 401。注释描述的回退从未被实现。
+    # 这三个属性是回退的唯一收口点，调用方一律读它们。
+    #
+    # 为什么 model 也参与回退：provider 与 embedding 模型是绑定的。
+    # DeepSeek 官方 API 不提供 embedding 服务（截至 2026-08 定价页仅有对话模型），
+    # 所以「主模型配了DeepSeek」时回退出的 base_url 指向一个没有 embedding
+    # 端点的host —— 此时若仍沿用默认的 BAAI/bge-m3，请求会以404/模型不存在告终。
+    # 配了 EMBEDDING_BASE_URL 就意味着换了 provider，模型名必须跟着换。
+    @property
+    def effective_embedding_api_key(self) -> str:
+        return self.embedding_api_key or self.openai_api_key
+
+    @property
+    def effective_embedding_base_url(self) -> str:
+        return self.embedding_base_url or self.openai_base_url
+
+    @property
+    def effective_embedding_model(self) -> str:
+        #只有换了 provider 才需要换模型名；同一 provider（留空回退）时沿用 embedding_model。
+        # 留空兜底为 OpenAI 官方模型名——回退只在主模型 provider 确实提供
+        # embedding 端点时成立（OpenAI 或兼容网关等）。
+        if self.embedding_base_url:
+            return self.embedding_model
+        return self.embedding_model or "text-embedding-3-small"
+
     def assert_openai_configured(self) -> None:
         """需要调用主 LLM 时使用：确认主模型凭据已配置。"""
         if not self.openai_api_key:
@@ -139,11 +169,39 @@ class Settings(BaseSettings):
                 self._MISSING_CREDENTIAL.format(key="OPENAI_API_KEY")
             )
 
+    # 已知无 embedding 端点的 provider 主机名片段（实测 DeepSeek 返回 404，
+    # 官方定价页截至 2026-08 也只列对话模型）。用于把「回退不可用」
+    # 从运行时的 404 提前到配置期的显式提示。
+    _NO_EMBEDDING_HOSTS = ("deepseek.com",)
+
     def assert_embedding_configured(self) -> None:
-        """需要向量化时使用：embedding 凭据留空则回退主模型凭据。"""
-        if not self.embedding_api_key and not self.openai_api_key:
+        """需要向量化时使用。
+
+        分三档：独立配置可用 / 回退可用 / 回退不可用。
+        最后一档是实测踩出来的——DeepSeek 官方不提供 embedding 服务，
+        只配主模型时凭据「看起来齐了」，实际请求 404。这种失败必须在配置期
+        说清楚，否则用户会以为是 key 填错了。
+        """
+        if self.embedding_base_url:
+            if not self.embedding_api_key:
+                raise RuntimeError(
+                    "已配置 EMBEDDING_BASE_URL 但缺少 EMBEDDING_API_KEY，"
+                    "无法完成向量化（指定了独立 provider 就必须给它配密钥）"
+                )
+            return
+
+        # 回退路径：依赖主模型凭据
+        if not self.openai_api_key:
             raise RuntimeError(
-                self._MISSING_CREDENTIAL.format(key="EMBEDDING_API_KEY")
+                "Embedding 凭据缺失：请配置 EMBEDDING_API_KEY / EMBEDDING_BASE_URL，"
+                "或配置 OPENAI_API_KEY 走回退"
+            )
+        if any(h in self.openai_base_url for h in self._NO_EMBEDDING_HOSTS):
+            raise RuntimeError(
+                f"主模型 provider（{self.openai_base_url}）不提供 embedding 服务，"
+                "回退路径不可用（实测返回 404）。请显式配置 EMBEDDING_BASE_URL "
+                "与 EMBEDDING_API_KEY 指向支持 embedding 的服务，"
+                "例如硅基流动 https://api.siliconflow.cn/v1 + BAAI/bge-m3"
             )
 
 

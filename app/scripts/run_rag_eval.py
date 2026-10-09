@@ -120,10 +120,11 @@ def main():
     )
 
     # ---------- 检索器（与生产同路径） ----------
+    settings.assert_embedding_configured()
     embedder = Embedder(
-        api_key=settings.embedding_api_key,
-        base_url=settings.embedding_base_url,
-        model=settings.embedding_model,
+        api_key=settings.effective_embedding_api_key,
+        base_url=settings.effective_embedding_base_url,
+        model=settings.effective_embedding_model,
         timeout=settings.openai_timeout,
         max_retries=settings.openai_max_retries,
     )

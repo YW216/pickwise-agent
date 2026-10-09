@@ -17,7 +17,14 @@ class Embedder:
         self,
         api_key: str,
         base_url: str,
-        model: str = "text-embedding-3-small",
+        # 默认值刻意与 settings.embedding_model 保持一致（BAAI/bge-m3）。
+        # 原为 text-embedding-3-small，与项目配置脱节：绕过 Settings 直接实例化
+        # （如 tests/ 里的 verify 脚本）时会拿到与生产不同的模型，
+        # 而 Embedder.retriever 又有「索引模型 vs 当前模型一致性校验」——
+        # 不一致时报错要求重建索引，代价远高于默认值本身。
+        # 另见 settings.effective_embedding_model：换 provider 时模型名需一并切换
+        # （DeepSeek 官方不提供 embedding 服务）。
+        model: str = "BAAI/bge-m3",
         batch_size: int = 64,
         *,
         timeout: float = 60.0,

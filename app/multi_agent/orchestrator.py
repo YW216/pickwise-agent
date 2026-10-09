@@ -38,6 +38,7 @@ class MultiAgentOrchestrator:
     """多 Agent 编排器：协调 Router、子 Agent、黑板与 Result Agent。"""
 
     def __init__(self, session_path: Optional[str] = None):
+        settings.assert_openai_configured()
         self.client = openai.OpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,

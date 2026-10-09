@@ -40,6 +40,8 @@ app/evaluation/report.json
 
 develop_docs/
 
+
+
 # AI 工具缓存与临时日志（2026-09-16 重建基线时补充）
 .codegraph/
 .cursor/
@@ -52,3 +54,8 @@ _retest.log
 待办任务.md
 _tmp_*.py
 _cleanup_backup/
+项目学习文档/
+report/
+sql/
+test.py
+wtest.py

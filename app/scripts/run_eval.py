@@ -243,6 +243,7 @@ def main() -> None:
 
     print("\n[2/3] 沙箱逐条运行（真调 LLM，mock 工具，独立会话）...")
     from openai import OpenAI
+    settings.assert_openai_configured()
     # judge 的 client 也会被 langfuse 的类级补丁接到（wrapt 全局补丁）：评测侧
     # 不主动为其建 trace，而是由 evaluator 把 judge 调用挂回对应用例 trace 下
     client = OpenAI(

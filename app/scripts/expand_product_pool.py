@@ -97,6 +97,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=2, help="每次 LLM 调用生成的商品数（大批次易 JSON 截断）")
     args = parser.parse_args()
 
+    settings.assert_openai_configured()
     client = OpenAI(
         api_key=settings.openai_api_key, base_url=settings.openai_base_url,
         timeout=settings.openai_timeout, max_retries=settings.openai_max_retries,

@@ -113,6 +113,7 @@ def main():
     )
     args = parser.parse_args()
 
+    settings.assert_openai_configured()
     client = OpenAI(
         api_key=settings.openai_api_key, base_url=settings.openai_base_url,
         timeout=settings.openai_timeout, max_retries=settings.openai_max_retries,
@@ -175,9 +176,9 @@ def main():
         product_client = _get_client()
         product_client.load_collection(settings.product_collection)
         embedder = Embedder(
-            api_key=settings.embedding_api_key,
-            base_url=settings.embedding_base_url,
-            model=settings.embedding_model,
+            api_key=settings.effective_embedding_api_key,
+            base_url=settings.effective_embedding_base_url,
+            model=settings.effective_embedding_model,
             timeout=settings.openai_timeout,
             max_retries=settings.openai_max_retries,
         )

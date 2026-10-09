@@ -20,8 +20,8 @@ backend = MilvusBackend(
     collection_name=settings.milvus_collection,
 )
 embedder = Embedder(
-    api_key=settings.embedding_api_key,
-    base_url=settings.embedding_base_url,
+    api_key=settings.effective_embedding_api_key,
+    base_url=settings.effective_embedding_base_url,
     model=settings.embedding_model,
 )
 r = KnowledgeRetriever(embedder=embedder, backend=backend)

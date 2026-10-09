@@ -25,9 +25,9 @@ def _get_retriever() -> KnowledgeRetriever:
     global _retriever
     if _retriever is None:
         embedder = Embedder(
-            api_key=settings.embedding_api_key,
-            base_url=settings.embedding_base_url,
-            model=settings.embedding_model,
+            api_key=settings.effective_embedding_api_key,
+            base_url=settings.effective_embedding_base_url,
+            model=settings.effective_embedding_model,
             timeout=settings.openai_timeout,
             max_retries=settings.openai_max_retries,
         )

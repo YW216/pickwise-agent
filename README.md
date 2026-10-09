@@ -78,7 +78,7 @@ EMBEDDING_API_KEY=sk-你的embeddingkey
 EMBEDDING_MODEL=BAAI/bge-m3
 ```
 
-> ⚠️ **不要照抄 `.env.example` 里所有键**。本项目 `Settings` 用 pydantic-settings的 `extra_forbidden`，`.env` 里出现**未声明的键会让整个配置加载失败**。`.env.example` 中 `RAG_BACKEND`、`KB_INDEX_PATH`、`CHROMA_PERSIST_DIR`、`CHROMA_COLLECTION`、`MULTI_AGENT_ENABLED` 属于历史遗留，删掉即可。
+> ⚠️ **不要照抄 `.env.example` 里所有键**。本项目 `Settings` 用 pydantic-settings 的 `extra_forbidden`，`.env` 里出现**未声明的键会让整个配置加载失败**。`.env.example` 中 `RAG_BACKEND`、`KB_INDEX_PATH`、`CHROMA_PERSIST_DIR`、`CHROMA_COLLECTION`、`MULTI_AGENT_ENABLED` 属于历史遗留，删掉即可。
 
 ### 3. 运行
 
@@ -285,9 +285,11 @@ pytest tests/ -v
 
 ## 已知事项
 
-- **`.env.example` 含失效键** —— `RAG_BACKEND`、`CHROMA_*`、`KB_INDEX_PATH`、`MULTI_AGENT_ENABLED` 在代码中已无对应字段（向量库已统一切到 Milvus，单/多Agent 双模式已合并）。复制后请删除这些键，否则 `extra_forbidden` 会让配置加载失败。
+- **凭据零硬编码** —— 所有密钥字段在 `settings.py` 中一律无默认值，由 `.env` / 环境变量注入。缺凭据时不会在 import 期崩溃（那会让离线单测全部无法收集），而是在真正调用 LLM 的入口显式抛出可操作报错：`assert_openai_configured()` / `assert_embedding_configured()`。
+- **Embedding 凭据回退** —— `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` 留空时回退到主模型配置，由 `settings.effective_embedding_*` 三个属性统一收口（调用方只读这三个）。注意**回退仅在主模型 provider 确实提供 embedding 端点时成立**：DeepSeek 官方不提供（实测 404），所以用 DeepSeek 做主模型时这两项必须显式配置，否则会在配置期被 `assert_embedding_configured()` 拦下。
+- **`.env.example` 已清理失效键** —— `RAG_BACKEND`、`CHROMA_*`、`KB_INDEX_PATH`、`MULTI_AGENT_ENABLED` 在代码中已无对应字段（向量库已统一切到 Milvus，单/多 Agent 双模式已合并），保留它们会因 `extra_forbidden` 让配置加载失败。
 - **`requirements.txt` 未声明 `langfuse` 与 `pytest`** —— `langfuse` 在 `orchestrator.py` 是强 import，不装无法启动；`pytest` 是跑测试的前提。两者需单独安装。
-- **`embedding_model` 三处不一致** —— `settings.py` 默认 `BAAI/bge-m3`，`embedder.py` 类默认与 `.env.example` 写 `text-embedding-3-small`。实际生效取决于 `.env`。
 - **MCP 服务端已暂停** —— `mcp_server/server.py` 只剩注释，客户端代码就绪但服务端工具已下线，当前降级使用本地工具。
 - **根目录 `agentdemo.py` / `test.py` / `wtest.py`** 是学习期function calling 与装饰器的草稿，不属于应用，`agentdemo.py` 本身无法运行。
 - **`tests/test_multi_agent.py`** 是脚本式断言（非 pytest 风格），不被 pytest 收集。
+- **`tests/test_evaluation.py::test_rule_content_checks` 当前失败** —— `ValueError: max() arg is an empty sequence`，属存量 bug（与配置改造无关），公开前建议修掉。
