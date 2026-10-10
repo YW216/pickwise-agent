@@ -32,8 +32,8 @@ from app.agent.rag.chunker import chunk_markdown_dir  # noqa: E402
 from app.db.snapshot import PRODUCTS  # noqa: E402
 from app.config.settings import settings  # noqa: E402
 
-# 卡片渲染与 build_product_kb 共用同一模板，保证评测 query 与索引内容同源
-from app.scripts.build_product_kb import build_card_text  # noqa: E402
+# 卡片渲染与索引构建共用同一模板（service 层定义），保证评测 query 与索引内容同源
+from app.services.product_sync import build_card_text  # noqa: E402
 
 # query 风格轮换：避免 65 条 query 全是同一种问法（分布多样性）
 STYLES = [

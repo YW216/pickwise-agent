@@ -1,31 +1,20 @@
-"""构建商品语义检索库（product_kb collection）。
+"""商品索引入口脚本（CLI 壳）：rebuild 全量重建 / incremental 增量同步。
 
-数据源：PG products 表（真值层，经 app.db.snapshot.PRODUCTS 加载）。
-每款商品渲染成一张"商品卡片"语义文本，一商品一条记录（chunk_id = product_id）。
+两种模式（develop_docs/rag增量更新.md 第七节）：
+  --mode rebuild      首次初始化 / 契约变更 / 异常恢复：drop → 全量 embed → 重建
+  --mode incremental  日常同步：只处理 diff 出的变化商品（默认模式）
+  --dry-run           只输出差异计划，不写 Milvus、不写 PG、不调 embedding
 
-卡片模板 v2（text，embedding + BM25 的唯一索引对象，各段均有语义职责）：
-  {name}（{category} · {brand}）      ← 型号/品牌词面（BM25 精确匹配型号 query）
-  配置：k v / k v …                   ← 参数型 query（specs 按键名排序，防字典序漂移）
-  <introduction 段落>                 ← 场景描述最丰富的语义来源
-（summary 不进 text：与 introduction 语义重叠，仅作返回卡片的展示字段）
+同步核心逻辑在 app/services/product_sync.py（service 层，与壳解耦）——
+本脚本只是 CLI 壳；worker / FastAPI 未来复用同一 sync()。
 
-v2 变更（2026-10-10）：移除"售价 X 元"行——
-- embedding 对数字 token 不敏感，价格进 text 无语义收益；
-- 预算过滤已有 price 标量字段下推 expr，比词面匹配可靠；
-- 价格是高频变更字段，留在 text 会导致每次调价都重算 embedding。
-price 从此只走标量通道（见 develop_docs/rag增量更新.md 第四节）。
-
-字段设计（检索面最小集，真值留 catalog / PG）：
-- product_id（主键）→ 命中后回查 catalog 组装返回卡片
-- price / category → 标量过滤（预算、品类）
-- embedding + sparse_bm25（Function 生成）→ dense / BM25 双路索引
-- collection description 持久化契约指纹（embedding 模型 + 模板版本），
-  供增量同步校验"索引内容与当前构建方式是否兼容"
-
-用法：python app/scripts/build_product_kb.py
+用法：
+  python app/scripts/build_product_kb.py                        # 增量同步
+  python app/scripts/build_product_kb.py --mode incremental --dry-run
+  python app/scripts/build_product_kb.py --mode rebuild
 """
 
-import hashlib
+import argparse
 import sys
 from pathlib import Path
 
@@ -39,30 +28,61 @@ from app.agent.rag.embedder import Embedder  # noqa: E402
 from app.agent.rag.milvus_utils import ensure_reachable  # noqa: E402
 from app.db.catalog_repo import mark_products_indexed  # noqa: E402
 from app.db.snapshot import PRODUCTS  # noqa: E402
-
-# 卡片模板版本：模板任何影响 text 的改动都必须递增，并触发一次全量重建
-# （旧向量与新模板混索 = 语义不一致；版本号进 collection description 参与契约校验）
-TEMPLATE_VERSION = "product_card_template_v2"
-
-
-def card_hash(text: str) -> str:
-    """检索面文本指纹：增量同步判"向量是否需要重算"的唯一依据。"""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def build_card_text(product: dict) -> str:
-    """商品 → 卡片语义文本（各段均有语义职责，见模块 docstring）。"""
-    lines = [
-        f"{product['name']}（{product['category']} · {product['brand']}）",
-        "配置：" + " / ".join(
-            f"{k} {v}" for k, v in sorted(product["specs"].items())
-        ),
-        *product.get("introduction", []),
-    ]
-    return "\n".join(lines)
+from app.services.product_sync import (  # noqa: E402
+    TEMPLATE_VERSION,
+    build_card_text,
+    build_contract,
+    card_hash,
+    sync,
+)
 
 
 def main():
+    """CLI 分流：rebuild 走本脚本全量重建，incremental 委托 service 层 sync()。"""
+    parser = argparse.ArgumentParser(description="商品语义索引：rebuild / incremental")
+    parser.add_argument(
+        "--mode",
+        choices=["incremental", "rebuild"],
+        default="incremental",
+        help="incremental=日常增量同步（默认）；rebuild=全量重建",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只输出差异计划，不写 Milvus、不写 PG、不调 embedding（仅 incremental）",
+    )
+    args = parser.parse_args()
+
+    if args.mode == "rebuild":
+        rebuild()
+        return
+
+    try:
+        stats = sync(dry_run=args.dry_run)
+    except RuntimeError as exc:
+        # 可预期失败（契约不匹配 / 空快照 / collection 缺失）：人话提示后退出
+        print(f"❌ 增量同步中止：{exc}")
+        sys.exit(1)
+
+    label = "差异计划（dry-run，未写入）" if args.dry_run else "增量同步报告"
+    print("=" * 60)
+    print(f"  商品索引增量同步 · {label}")
+    print("=" * 60)
+    print(f"  新增         : {len(stats.added)}  {stats.added or ''}")
+    print(f"  文本变(重算向量): {len(stats.text_changed)}  {stats.text_changed or ''}")
+    print(f"  行变(复用向量) : {len(stats.row_changed)}  {stats.row_changed or ''}")
+    print(f"  未变(跳过)     : {len(stats.unchanged)}")
+    print(f"  删除         : {len(stats.deleted)}  {stats.deleted or ''}")
+    if not args.dry_run:
+        print(f"  embedding 调用 : {stats.embedded}（降级 {len(stats.degraded)}）")
+        print(f"  upsert / delete : {stats.upserted} / {stats.deleted_count}")
+        print(f"  状态标记        : {stats.marked}"
+              + (f"（乐观锁跳过 {stats.lock_skipped}，下轮重做）" if stats.lock_skipped else ""))
+    print("=" * 60)
+
+
+def rebuild():
+    """全量重建（drop → create → insert），首次初始化 / 契约变更 / 异常恢复用。"""
     uri = settings.milvus_uri
     if not uri.startswith("http"):
         uri = str(ROOT / uri)
@@ -138,7 +158,7 @@ def main():
     # 回退链下可能不同，增量校验必须以"实际构建时用的"为准。
     # 注意：pymilvus 2.6 + standalone 实测 create_collection 的 description
     # 参数不生效（describe 返回空），必须写 properties.description
-    contract = f"embedding_model={embedder.model};template={TEMPLATE_VERSION}"
+    contract = build_contract(embedder.model)
     client.create_collection(
         collection_name=collection,
         schema=schema,
@@ -194,11 +214,11 @@ def main():
     # 写回同步状态（衔接增量同步，develop_docs/rag增量更新.md）：
     # rebuild 等价于"全量同步成功"，必须把 card_hash + indexed_at 刷齐，
     # 否则增量首轮会把全部商品当脏数据重算（幂等但白烧 embedding 调用）
-    indexed = mark_products_indexed(
+    marked, _skipped = mark_products_indexed(
         settings.database_url,
         {p["product_id"]: card_hash(text) for p, text in zip(products, texts)},
     )
-    print(f"   已写回同步状态（PG card_hash/indexed_at）：{indexed} 条")
+    print(f"   已写回同步状态（PG card_hash/indexed_at）：{marked} 条")
 
     print("\n🎉 商品语义检索库构建完成。")
 

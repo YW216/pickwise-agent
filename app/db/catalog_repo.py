@@ -144,26 +144,70 @@ def load_full_catalog(database_url: str) -> dict:
     return {"products": products, "favorites": favorites}
 
 
-def mark_products_indexed(database_url: str, card_hashes: dict[str, str]) -> int:
-    """索引成功后写回同步状态：card_hash + indexed_at（全量重建与增量同步共用）。
+def load_sync_snapshot(database_url: str) -> dict:
+    """全量加载商品 + 同步状态列（增量同步 sync 的 diff 输入）。
 
-    - indexed_at 取数据库 now()：与 updated_at 同一 PG 时钟，脏判定
-      （updated_at > indexed_at）无跨机时钟偏移问题
-    - 只写这两列、不触碰业务字段 → updated_at 触发器（WHEN 业务字段）不生效，
-      不会把刚同步的商品重新标脏
-    - Returns: 写回的行数（应等于 len(card_hashes)）
+    返回 pid → 业务字段 + updated_at / card_hash / indexed_at。
+    空库返回 {}——空快照保护（防误删索引）在 sync 层判定，本函数只负责取数。
     """
-    if not card_hashes:
-        return 0
+    sql = """
+        SELECT product_id, name, brand, category, price, specs, introduction,
+               updated_at, card_hash, indexed_at
+        FROM products
+        ORDER BY product_id
+    """
     with connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.executemany(
-                "UPDATE products SET card_hash = %s, indexed_at = now()"
-                " WHERE product_id = %s",
-                [(h, pid) for pid, h in card_hashes.items()],
-            )
+            cur.execute(sql)
+            rows = cur.fetchall()
+    return {
+        pid: {"product_id": pid, "name": name, "brand": brand,
+              "category": cat, "price": price, "specs": specs,
+              "introduction": intro, "updated_at": ua,
+              "card_hash": ch, "indexed_at": ia}
+        for pid, name, brand, cat, price, specs, intro, ua, ch, ia in rows
+    }
+
+
+def mark_products_indexed(
+    database_url: str,
+    card_hashes: dict[str, str],
+    expected_updated_at: dict | None = None,
+) -> tuple[int, list[str]]:
+    """索引成功后写回同步状态：card_hash + indexed_at（rebuild 与增量共用）。
+
+    - expected_updated_at 提供（增量同步路径）→ WHERE 加 updated_at = 快照值：
+      乐观锁。同步期间又被业务修改的行不标记（防"改了却被标已索引"），
+      未命中的 id 由调用方留给下轮重做
+    - 未提供（rebuild 路径）→ 无条件更新
+    - indexed_at 取数据库 now()：与 updated_at 同一 PG 时钟，脏判定无跨机偏移
+    - 只写这两列、不触碰业务字段 → updated_at 触发器（WHEN 业务字段）不生效
+    - Returns: (成功标记行数, 乐观锁未命中 id 列表)
+    """
+    if not card_hashes:
+        return 0, []
+    marked, skipped = 0, []
+    with connect(database_url) as conn:
+        with conn.cursor() as cur:
+            for pid, h in card_hashes.items():
+                if expected_updated_at is not None:
+                    cur.execute(
+                        "UPDATE products SET card_hash = %s, indexed_at = now()"
+                        " WHERE product_id = %s AND updated_at = %s",
+                        (h, pid, expected_updated_at[pid]),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE products SET card_hash = %s, indexed_at = now()"
+                        " WHERE product_id = %s",
+                        (h, pid),
+                    )
+                if cur.rowcount:
+                    marked += 1
+                else:
+                    skipped.append(pid)
         conn.commit()
-    return len(card_hashes)
+    return marked, skipped
 
 
 def init_schema_and_seed(database_url: str, catalog: dict) -> dict:
