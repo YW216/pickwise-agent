@@ -1,23 +1,31 @@
 """构建商品语义检索库（product_kb collection）。
 
-数据源：app/agent/tools/mock_data.py 的 PRODUCTS（含 introduction 段落）。
+数据源：PG products 表（真值层，经 app.db.snapshot.PRODUCTS 加载）。
 每款商品渲染成一张"商品卡片"语义文本，一商品一条记录（chunk_id = product_id）。
 
-卡片模板（text，embedding + BM25 的唯一索引对象，各段均有语义职责）：
+卡片模板 v2（text，embedding + BM25 的唯一索引对象，各段均有语义职责）：
   {name}（{category} · {brand}）      ← 型号/品牌词面（BM25 精确匹配型号 query）
-  配置：k v / k v …                   ← 参数型 query
+  配置：k v / k v …                   ← 参数型 query（specs 按键名排序，防字典序漂移）
   <introduction 段落>                 ← 场景描述最丰富的语义来源
-  售价 {price} 元
 （summary 不进 text：与 introduction 语义重叠，仅作返回卡片的展示字段）
 
-字段设计（检索面最小集，真值留 catalog / 未来 PG）：
+v2 变更（2026-10-10）：移除"售价 X 元"行——
+- embedding 对数字 token 不敏感，价格进 text 无语义收益；
+- 预算过滤已有 price 标量字段下推 expr，比词面匹配可靠；
+- 价格是高频变更字段，留在 text 会导致每次调价都重算 embedding。
+price 从此只走标量通道（见 develop_docs/rag增量更新.md 第四节）。
+
+字段设计（检索面最小集，真值留 catalog / PG）：
 - product_id（主键）→ 命中后回查 catalog 组装返回卡片
 - price / category → 标量过滤（预算、品类）
 - embedding + sparse_bm25（Function 生成）→ dense / BM25 双路索引
+- collection description 持久化契约指纹（embedding 模型 + 模板版本），
+  供增量同步校验"索引内容与当前构建方式是否兼容"
 
 用法：python app/scripts/build_product_kb.py
 """
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -29,16 +37,27 @@ from pymilvus import DataType, Function, FunctionType, MilvusClient  # noqa: E40
 from app.config.settings import settings  # noqa: E402
 from app.agent.rag.embedder import Embedder  # noqa: E402
 from app.agent.rag.milvus_utils import ensure_reachable  # noqa: E402
+from app.db.catalog_repo import mark_products_indexed  # noqa: E402
 from app.db.snapshot import PRODUCTS  # noqa: E402
+
+# 卡片模板版本：模板任何影响 text 的改动都必须递增，并触发一次全量重建
+# （旧向量与新模板混索 = 语义不一致；版本号进 collection description 参与契约校验）
+TEMPLATE_VERSION = "product_card_template_v2"
+
+
+def card_hash(text: str) -> str:
+    """检索面文本指纹：增量同步判"向量是否需要重算"的唯一依据。"""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def build_card_text(product: dict) -> str:
     """商品 → 卡片语义文本（各段均有语义职责，见模块 docstring）。"""
     lines = [
         f"{product['name']}（{product['category']} · {product['brand']}）",
-        "配置：" + " / ".join(f"{k} {v}" for k, v in product["specs"].items()),
+        "配置：" + " / ".join(
+            f"{k} {v}" for k, v in sorted(product["specs"].items())
+        ),
         *product.get("introduction", []),
-        f"售价 {product['price']} 元",
     ]
     return "\n".join(lines)
 
@@ -114,8 +133,17 @@ def main():
     )
 
     print("\n[3/3] 写入索引...")
+    # 契约指纹持久化在 collection properties（Milvus 无 collection 级自定义
+    # metadata）：记录实际使用的 embedder 模型，而非 settings 配置值——两者在
+    # 回退链下可能不同，增量校验必须以"实际构建时用的"为准。
+    # 注意：pymilvus 2.6 + standalone 实测 create_collection 的 description
+    # 参数不生效（describe 返回空），必须写 properties.description
+    contract = f"embedding_model={embedder.model};template={TEMPLATE_VERSION}"
     client.create_collection(
-        collection_name=collection, schema=schema, index_params=index_params
+        collection_name=collection,
+        schema=schema,
+        index_params=index_params,
+        properties={"description": contract},
     )
     client.insert(
         collection_name=collection,
@@ -162,6 +190,15 @@ def main():
     print(f"   对齐校验：抽查 {len(sample_ids)} 行 text/price 与真值一致 ✅")
     client.load_collection(collection)
     print(f"   已写入 {len(products)} 条商品卡片")
+
+    # 写回同步状态（衔接增量同步，develop_docs/rag增量更新.md）：
+    # rebuild 等价于"全量同步成功"，必须把 card_hash + indexed_at 刷齐，
+    # 否则增量首轮会把全部商品当脏数据重算（幂等但白烧 embedding 调用）
+    indexed = mark_products_indexed(
+        settings.database_url,
+        {p["product_id"]: card_hash(text) for p, text in zip(products, texts)},
+    )
+    print(f"   已写回同步状态（PG card_hash/indexed_at）：{indexed} 条")
 
     print("\n🎉 商品语义检索库构建完成。")
 

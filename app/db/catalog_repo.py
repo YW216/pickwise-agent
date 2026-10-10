@@ -144,11 +144,37 @@ def load_full_catalog(database_url: str) -> dict:
     return {"products": products, "favorites": favorites}
 
 
+def mark_products_indexed(database_url: str, card_hashes: dict[str, str]) -> int:
+    """索引成功后写回同步状态：card_hash + indexed_at（全量重建与增量同步共用）。
+
+    - indexed_at 取数据库 now()：与 updated_at 同一 PG 时钟，脏判定
+      （updated_at > indexed_at）无跨机时钟偏移问题
+    - 只写这两列、不触碰业务字段 → updated_at 触发器（WHEN 业务字段）不生效，
+      不会把刚同步的商品重新标脏
+    - Returns: 写回的行数（应等于 len(card_hashes)）
+    """
+    if not card_hashes:
+        return 0
+    with connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "UPDATE products SET card_hash = %s, indexed_at = now()"
+                " WHERE product_id = %s",
+                [(h, pid) for pid, h in card_hashes.items()],
+            )
+        conn.commit()
+    return len(card_hashes)
+
+
 def init_schema_and_seed(database_url: str, catalog: dict) -> dict:
     """建表（幂等）+ 清理废弃表 + 播种（从 init_pg 调用）。
 
     - 废弃表 reviews / warranties 直接删除（2026-09-15 裁定不落库）
     - products 已有数据则跳过播种；favorites 为空则从本地 FAVORITES 播种
+    - RAG 增量同步列（2026-10-10，develop_docs/rag增量更新.md）：
+      updated_at  业务变更时间（触发器维护，仅业务字段变化时刷新）
+      card_hash   检索面卡片文本的 SHA-256（判向量是否重算）
+      indexed_at  上次成功写入 Milvus 的时间（NULL = 从未同步）
     """
     with connect(database_url) as conn:
         with conn.cursor() as cur:
@@ -162,12 +188,49 @@ def init_schema_and_seed(database_url: str, catalog: dict) -> dict:
                     category     VARCHAR NOT NULL,
                     price        INTEGER NOT NULL,
                     specs        JSONB NOT NULL,
-                    introduction JSONB NOT NULL
+                    introduction JSONB NOT NULL,
+                    updated_at   TIMESTAMP NOT NULL DEFAULT now(),
+                    card_hash    VARCHAR(64),
+                    indexed_at   TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS favorites (
                     product_id VARCHAR PRIMARY KEY REFERENCES products(product_id),
                     added_at   TIMESTAMP NOT NULL DEFAULT now()
                 );
+            """)
+            # 存量库迁移（幂等）：新建库由上方 CREATE TABLE 覆盖，已有库补列
+            cur.execute("""
+                ALTER TABLE products
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT now(),
+                    ADD COLUMN IF NOT EXISTS card_hash  VARCHAR(64),
+                    ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP
+            """)
+            # 触发器只在业务字段变化时刷新 updated_at——同步标记只写
+            # card_hash / indexed_at，若被触发器连带刷 updated_at，会出现
+            # updated_at > indexed_at 恒成立 → 商品永远被判脏 → 无限重算
+            cur.execute("""
+                CREATE OR REPLACE FUNCTION touch_products_updated_at()
+                RETURNS trigger AS $fn$
+                BEGIN
+                    NEW.updated_at = now();
+                    RETURN NEW;
+                END;
+                $fn$ LANGUAGE plpgsql
+            """)
+            cur.execute("""
+                DROP TRIGGER IF EXISTS products_touch_updated_at ON products
+            """)
+            cur.execute("""
+                CREATE TRIGGER products_touch_updated_at
+                BEFORE UPDATE ON products
+                FOR EACH ROW
+                WHEN (NEW.name          IS DISTINCT FROM OLD.name
+                   OR NEW.brand         IS DISTINCT FROM OLD.brand
+                   OR NEW.category      IS DISTINCT FROM OLD.category
+                   OR NEW.price         IS DISTINCT FROM OLD.price
+                   OR NEW.specs         IS DISTINCT FROM OLD.specs
+                   OR NEW.introduction  IS DISTINCT FROM OLD.introduction)
+                EXECUTE FUNCTION touch_products_updated_at()
             """)
             cur.execute("SELECT count(*) FROM products")
             existing = cur.fetchone()[0]

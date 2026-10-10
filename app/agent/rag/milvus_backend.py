@@ -8,8 +8,8 @@
 schema 约定（与 tests/verify_milvus_lite.py 探路结论一致）：
 - 字段：chunk_id（主键）/ doc / section / text / embedding
 - 索引：AUTOINDEX + COSINE（score = 相似度，越大越相似）
-- embedding_model 借道 collection description 持久化：Milvus 没有 collection 级
-  自定义 metadata，加载时校验 description，避免"换了 embedding 却还在用老索引"
+- embedding_model 借道 collection properties 持久化（pymilvus 2.6 + standalone
+  实测 description 参数不生效）：加载时校验，避免"换了 embedding 却还在用老索引"
 """
 
 from __future__ import annotations
@@ -128,12 +128,13 @@ class MilvusBackend:
             metric_type="BM25",
         )
 
-        # description 充当 collection 级元数据，携带 embedding_model 标识
+        # 契约指纹写 collection properties（pymilvus 2.6 + standalone 实测
+        # description 参数不生效，properties.description 才能被 describe 读回）
         self._client.create_collection(
             collection_name=self._collection_name,
             schema=schema,
             index_params=index_params,
-            description=embedding_model,
+            properties={"description": embedding_model},
         )
 
         self._client.insert(
@@ -253,7 +254,12 @@ class MilvusBackend:
                 f"构建索引。"
             )
         info = self._client.describe_collection(self._collection_name)
-        self._embedding_model = (info.get("description") or "").strip()
+        # 优先读 properties.description（standalone 实测唯一生效的写法），
+        # 顶层 description 兜底（兼容旧 lite 写法）
+        props = info.get("properties") or {}
+        self._embedding_model = (
+            props.get("description") or info.get("description") or ""
+        ).strip()
         # 跨进程重开持久化库时 collection 处于 released 状态，搜索前必须 load
         # （同进程 create→insert 会自动 load，因此重建场景下此调用是无害的幂等操作）
         self._client.load_collection(self._collection_name)
