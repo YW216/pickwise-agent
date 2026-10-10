@@ -7,8 +7,12 @@
 快照语义：进程生命周期内数据不变；PG 数据变更需重启进程（未来 FastAPI
 服务化时改为 repository 直查 / TTL 缓存，接口不变）。
 
-seed 文件（app/db/seed/products.json）是 PG 的导出快照，仅供 init_pg
-重建/灾备播种——不是运行时数据源。
+seed 文件（app/db/seed/products.json）是**冷启动/灾备播种源**，仅由
+app/scripts/init_pg.py 读取——本模块不读它，否则形成「从 PG 读出再写回 PG」
+的自我循环（空库时_load() 抛错→ 播种 0 条 → 冷启动死锁）。
+
+该文件是 mock_data 时代数据文件的搬迁，非 PG dump：**PG 中的数据演进不回写
+它，故它可能落后于 PG**。PG 是真值源；本文件只在 PG 不可用时用于重建。
 """
 
 from app.db.catalog_repo import load_full_catalog

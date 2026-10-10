@@ -24,10 +24,11 @@ def search_candidates(
     query: str | None = None,
     brand: str | None = None,
     category: str | None = None,
+    budget_min: float | None = None,
     budget_max: float | None = None,
     limit: int = 10,
 ) -> dict:
-    """结构化过滤查询：品牌/型号字面 + 品类精确 + 价格上限。
+    """结构化过滤查询：品牌/型号字面 + 品类精确 + 价格区间。
 
     Returns:
         {"candidates": [brief...], "total": 返回条数, "matched": 符合条件总数}
@@ -43,7 +44,8 @@ def search_candidates(
         FROM products
         WHERE (%(cat)s::text IS NULL OR category = %(cat)s::text)
           AND (%(brand)s::text IS NULL OR brand = %(brand)s::text)
-          AND (%(budget)s::numeric IS NULL OR price <= %(budget)s::numeric)
+          AND (%(bmin)s::numeric IS NULL OR price >= %(bmin)s::numeric)
+          AND (%(bmax)s::numeric IS NULL OR price <= %(bmax)s::numeric)
           AND (%(q)s::text IS NULL OR name ILIKE '%%' || %(q)s::text || '%%'
                                  OR brand ILIKE '%%' || %(q)s::text || '%%')
         ORDER BY product_id
@@ -51,7 +53,8 @@ def search_candidates(
     """
     with connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, {"cat": category, "brand": brand, "budget": budget_max,
+            cur.execute(sql, {"cat": category, "brand": brand,
+                              "bmin": budget_min, "bmax": budget_max,
                               "q": query, "lim": limit})
             rows = cur.fetchall()
     candidates = [
@@ -69,12 +72,13 @@ def search_nearest(
     query: str | None = None,
     brand: str | None = None,
     category: str | None = None,
+    budget_min: float | None = None,
     budget_max: float | None = None,
     limit: int = 3,
 ) -> dict:
-    """查无结果时找「条件外最接近」的候选（防幻觉兜底，忽略预算约束）。
+    """查无结果时找「条件外最接近」的候选（防幻觉兜底，忽略价格区间约束）。
 
-    排序：有预算按价格与预算差值升序；无预算按价格升序。
+    排序：有预算上限按价格与预算差值升序；无预算按价格升序。
     """
     sql = """
         SELECT product_id, name, brand, category, price, LEFT(introduction->>0, 64)
@@ -83,13 +87,14 @@ def search_nearest(
           AND (%(brand)s::text IS NULL OR brand = %(brand)s::text)
           AND (%(q)s::text IS NULL OR name ILIKE '%%' || %(q)s::text || '%%'
                                  OR brand ILIKE '%%' || %(q)s::text || '%%')
-        ORDER BY CASE WHEN %(budget)s::numeric IS NULL THEN price
-                      ELSE ABS(price - %(budget)s::numeric) END
+        ORDER BY CASE WHEN %(bmax)s::numeric IS NULL THEN price
+                      ELSE ABS(price - %(bmax)s::numeric) END
         LIMIT %(lim)s
     """
     with connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, {"cat": category, "brand": brand, "budget": budget_max,
+            cur.execute(sql, {"cat": category, "brand": brand,
+                              "bmin": budget_min, "bmax": budget_max,
                               "q": query, "lim": limit})
             rows = cur.fetchall()
     candidates = [

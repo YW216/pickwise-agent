@@ -55,11 +55,13 @@ def _get_embedder() -> Embedder:
     return _embedder
 
 
-def _build_expr(category: str | None, max_price: int | None) -> str | None:
+def _build_expr(category: str | None, min_price: int | None, max_price: int | None) -> str | None:
     """标量过滤表达式，下推到两路召回（过滤在 top-k 截断前生效）。"""
     parts = []
     if category:
         parts.append(f"category == '{category}'")
+    if min_price is not None:
+        parts.append(f"price >= {int(min_price)}")
     if max_price is not None:
         parts.append(f"price <= {int(max_price)}")
     return " and ".join(parts) or None
@@ -111,6 +113,7 @@ def _hybrid_product_ids(
 def search_products(
     query: str,
     category: str | None = None,
+    min_price: int | None = None,
     max_price: int | None = None,
     limit: int = 5,
 ) -> dict:
@@ -120,6 +123,7 @@ def search_products(
         query：自然语言描述的需求（如「适合打游戏的轻薄本」「通勤戴的安静耳机」，
                也可直接给型号如「凌霄 Pro 14」——BM25 路负责型号精确匹配）
         category：可选品类过滤（笔记本 / 手机 / 耳机）
+        min_price：可选价格下限（标量过滤；与 max_price 同值即精确价格）
         max_price：可选预算上限（标量过滤，比"五千左右"这类文本语义可靠）
         limit：返回商品数上限
 
@@ -140,7 +144,7 @@ def search_products(
             )
         client.load_collection(collection)
 
-        expr = _build_expr(category, max_price)
+        expr = _build_expr(category, min_price, max_price)
         ids = _hybrid_product_ids(
             query,
             _get_embedder().encode_one(query),
@@ -160,6 +164,8 @@ def search_products(
             # 防御性二次过滤：预算/品类过滤下推在 Milvus expr，若索引滞后
             # （改价/改品类还没同步），expr 会按旧值放行——按真值再校验一遍
             if category and product["category"] != category:
+                continue
+            if min_price is not None and product["price"] < min_price:
                 continue
             if max_price is not None and product["price"] > max_price:
                 continue

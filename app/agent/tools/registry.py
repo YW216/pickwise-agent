@@ -99,6 +99,14 @@ TOOL_DEFINITIONS: list[dict] = [
                         "description": "预算上限（元）",
                         "minimum": 0,
                     },
+                    "budget_min": {
+                        "type": "number",
+                        "description": (
+                            "价格下限（元）。用户说「3000 以上的」「4000 到 6000"
+                            " 之间的」时使用；与 budget_max 同值即精确价格"
+                        ),
+                        "minimum": 0,
+                    },
                     "limit": {
                         "type": "integer",
                         "description": (
@@ -168,6 +176,15 @@ TOOL_DEFINITIONS: list[dict] = [
                     "max_price": {
                         "type": "integer",
                         "description": "预算上限（元），如 5000 表示只要 5000 元及以下的商品",
+                        "minimum": 0,
+                    },
+                    "min_price": {
+                        "type": "integer",
+                        "description": (
+                            "价格下限（元）。用户说「4000 到 6000 之间的」「3000"
+                            " 以上的」「恰好 4000 元」时使用；与 max_price 同值"
+                            "即精确价格检索"
+                        ),
                         "minimum": 0,
                     },
                     "limit": {

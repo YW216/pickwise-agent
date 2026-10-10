@@ -60,6 +60,7 @@ def search_catalog(
     query: str | None = None,
     brand: str | None = None,
     category: str | None = None,
+    budget_min: float | None = None,
     budget_max: float | None = None,
     limit: int = 10,
 ) -> dict:
@@ -69,6 +70,7 @@ def search_catalog(
         query：品牌/型号字面关键词（如「墨白」「凌霄」）——仅匹配商品名与品牌
         brand：品牌精确匹配（封闭集合：星海/曜石/云章/墨白/极光）
         category：品类（笔记本 / 手机 / 耳机）
+        budget_min：价格下限（价格高于等于该值；与 budget_max 同值即精确价格）
         budget_max：预算上限（价格低于等于该值）
         limit：返回条数
 
@@ -85,7 +87,7 @@ def search_catalog(
             from app.db.catalog_repo import search_candidates, search_nearest
 
             res = search_candidates(settings.database_url, query, brand,
-                                    category, budget_max, limit)
+                                    category, budget_min, budget_max, limit)
             if res["total"]:
                 returned, matched = res["total"], res.get("matched", res["total"])
                 hint = (
@@ -94,7 +96,7 @@ def search_catalog(
                 )
                 return ok({**res, "hint": hint})
             near = search_nearest(settings.database_url, query, brand,
-                                  category, budget_max, 3)
+                                  category, budget_min, budget_max, 3)
             if near["candidates"]:
                 return fail(
                     "没有完全符合条件的产品，以下是条件外最接近的几款（供参考）",
