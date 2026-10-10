@@ -1,11 +1,9 @@
-"""Milvus 向量后端：MilvusClient 统一接入 lite（本地文件）与 standalone（HTTP）。
+"""Milvus 向量后端：基于 MilvusClient 接入 standalone（HTTP 服务）。
 
-为什么选 Milvus：
-- pymilvus 的 MilvusClient 对本地 .db（milvus-lite）与远程服务端（standalone）
-  是同一套 API——开发用 lite、生产换 standalone 只改 settings.milvus_uri，代码零改动
-- 新版 milvus-lite 支持稀疏向量与 BM25 Function，为混合检索（dense + BM25 + RRF）铺路
+- 部署：deploy/milvus 下 docker compose（standalone + Attu），uri 走 settings.milvus_uri
+- 稀疏向量 + BM25 Function（服务端 jieba 分词）支撑混合检索（dense + BM25 + RRF）
 
-schema 约定（与 tests/verify_milvus_lite.py 探路结论一致）：
+schema 约定（探路阶段实测确认）：
 - 字段：chunk_id（主键）/ doc / section / text / embedding
 - 索引：AUTOINDEX + COSINE（score = 相似度，越大越相似）
 - embedding_model 借道 collection properties 持久化（pymilvus 2.6 + standalone
@@ -15,7 +13,6 @@ schema 约定（与 tests/verify_milvus_lite.py 探路结论一致）：
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from app.agent.rag.chunker import Chunk
 from app.agent.rag.milvus_utils import ensure_reachable
@@ -45,7 +42,7 @@ class MilvusBackend:
     # ---- 内部工具 ----
 
     def _ensure_client(self) -> None:
-        """懒加载 MilvusClient；lite 本地路径先确保父目录存在。"""
+        """懒加载 MilvusClient；http uri 先做 TCP 探活快败（详见 milvus_utils）。"""
         if self._client is not None:
             return
         try:
@@ -56,11 +53,7 @@ class MilvusBackend:
                 "`pip install -r requirements.txt`。"
             ) from e
 
-        if not self._uri.startswith("http"):
-            Path(self._uri).parent.mkdir(parents=True, exist_ok=True)
-        else:
-            # 快速失败：TCP 层探活（详见 milvus_utils.ensure_reachable 注释）
-            ensure_reachable(self._uri)
+        ensure_reachable(self._uri)
         self._client = MilvusClient(self._uri)
 
     def _require_loaded(self) -> None:
@@ -96,8 +89,8 @@ class MilvusBackend:
         schema.add_field("doc", DataType.VARCHAR, max_length=256)
         schema.add_field("section", DataType.VARCHAR, max_length=512)
         # jieba 分词器：BM25 Function 在服务端用它对 text 分词、生成稀疏向量
-        # （lite 3.x / standalone v2.5+ 的参数格式是 {"tokenizer": "jieba"}，
-        #   服务端文档的 {"type": "chinese"} 写法在 lite 上不被接受）
+        # （参数格式为 {"tokenizer": "jieba"}，服务端文档的
+        #   {"type": "chinese"} 写法不被接受）
         schema.add_field(
             "text",
             DataType.VARCHAR,
@@ -254,8 +247,7 @@ class MilvusBackend:
                 f"构建索引。"
             )
         info = self._client.describe_collection(self._collection_name)
-        # 优先读 properties.description（standalone 实测唯一生效的写法），
-        # 顶层 description 兜底（兼容旧 lite 写法）
+        # 优先读 properties.description（standalone 实测唯一生效的写法）
         props = info.get("properties") or {}
         self._embedding_model = (
             props.get("description") or info.get("description") or ""

@@ -55,9 +55,8 @@ class Settings(BaseSettings):
     embedding_base_url: str = ""
     embedding_api_key: str = ""
     kb_dir: str = "app/agent/rag/knowledge"
-    # Milvus 向量后端：本地开发 milvus-lite（uri=本地 .db 路径），
-    # 生产 standalone（uri=http://host:19530），同一套代码仅切换 uri
-    milvus_uri: str = "app/sessions/milvus_lite_kb.db"
+    # Milvus 向量后端：standalone（deploy/milvus 下 docker compose 起的 HTTP 服务）
+    milvus_uri: str = "http://localhost:19530"
     milvus_collection: str = "ecom_kb"
     # 商品语义检索库（search_products）：与知识库分 collection——语义域不同
     # （知识问答 vs 商品卡片），更新节奏也不同（指南低频 / 商品信息随目录变）

@@ -6,8 +6,8 @@
   按商品介绍卡片的语义（dense）与词面（BM25 型号精确匹配）双路召回
 
 存储：product_kb collection（build_product_kb.py 构建），一商品一条记录，
-chunk_id = product_id，text = 商品卡片。Milvus 只存检索面；返回时按
-product_id 回查 catalog 组装轻卡片（真值在 catalog / 未来 PG）。
+chunk_id = product_id，text = 商品卡片。Milvus 只存检索面；命中后按
+product_id 批量回查 PG 真值组装轻卡片（不依赖进程内快照，价格永远最新）。
 
 评价暂不入库（2026-09-15 起评价与保修数据下线）。
 """
@@ -17,7 +17,7 @@ from __future__ import annotations
 from app.agent.rag.embedder import Embedder
 from app.agent.rag.milvus_utils import ensure_reachable
 from app.agent.tools.catalog import brief_view
-from app.db.snapshot import PRODUCTS
+from app.db.catalog_repo import get_products_by_ids
 from app.agent.tools.result import fail, ok
 from app.config.settings import settings
 
@@ -147,19 +147,27 @@ def search_products(
             top_k=limit,
             expr=expr,
         )
+
+        # 回查 PG 真值组装轻卡片（与 search_catalog 的 brief_view 同构）。
+        # 不读进程内快照 PRODUCTS：快照仅在进程启动时加载，PG 改价后即过期；
+        # 按命中 id 批量直查（一次 SQL 只取命中几条），价格/名称永远是真值。
+        products_by_id = get_products_by_ids(settings.database_url, ids)
+        results = []
+        for pid in ids:  # 按 Milvus 检索排序输出，不跟 dict 迭代序
+            product = products_by_id.get(pid)
+            if not product:
+                continue  # 索引尚有、PG 已删/下架：下轮同步清出，先不露出
+            # 防御性二次过滤：预算/品类过滤下推在 Milvus expr，若索引滞后
+            # （改价/改品类还没同步），expr 会按旧值放行——按真值再校验一遍
+            if category and product["category"] != category:
+                continue
+            if max_price is not None and product["price"] > max_price:
+                continue
+            results.append(brief_view(product))
     except ConnectionError as exc:
         return fail(str(exc), {"results": [], "total": 0})
-    except Exception as exc:  # noqa: BLE001 —— 检索服务故障时优雅降级
+    except Exception as exc:  # noqa: BLE001
         return fail(f"商品语义检索暂时不可用: {exc}")
-
-    # 回查 catalog 组装轻卡片（与 search_catalog 的 brief_view 同构）
-    results = []
-    for pid in ids:
-        product = PRODUCTS.get(pid)
-        if not product:
-            continue
-        card = brief_view(product)
-        results.append(card)
 
     if not results:
         return fail(

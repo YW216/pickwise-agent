@@ -51,8 +51,7 @@ TOP_K = 5
 
 
 def _resolve_uri() -> str:
-    uri = settings.milvus_uri
-    return uri if uri.startswith("http") else str(ROOT / uri)
+    return settings.milvus_uri
 
 
 def _hit_mrr(case, results, kind) -> tuple[bool, float]:

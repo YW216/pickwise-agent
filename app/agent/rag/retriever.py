@@ -1,8 +1,7 @@
 """知识库检索器：query → 向量化 → 委托 MilvusBackend 检索。
 
 设计上 retriever 只负责"问句怎么变向量""结果怎么聚合"，
-存储和打分都交给 MilvusBackend——MilvusClient 同一套 API 既连
-milvus-lite（本地文件，开发）也连 standalone（HTTP，生产），切换只改 uri。
+存储和打分都交给 MilvusBackend——standalone 部署（deploy/milvus）一套 API。
 
 校验逻辑：加载后比对 backend 持久化的 embedding_model 与当前 Embedder.model，
 不一致直接报错——避免"换了 embedding 但还在用老索引"这种隐蔽问题。

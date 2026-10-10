@@ -84,8 +84,6 @@ def main():
 def rebuild():
     """全量重建（drop → create → insert），首次初始化 / 契约变更 / 异常恢复用。"""
     uri = settings.milvus_uri
-    if not uri.startswith("http"):
-        uri = str(ROOT / uri)
     ensure_reachable(uri)
 
     client = MilvusClient(uri)

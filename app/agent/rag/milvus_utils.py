@@ -12,12 +12,7 @@ from urllib.parse import urlparse
 
 
 def ensure_reachable(uri: str, timeout: float = 2.0) -> None:
-    """http uri 先做 TCP 探活，不可达时立刻抛人话 ConnectionError。
-
-    lite 本地路径（非 http）没有连接概念，直接放行。
-    """
-    if not uri.startswith("http"):
-        return
+    """对 standalone 的 http uri 做 TCP 探活，不可达时立刻抛人话 ConnectionError。"""
     probe = urlparse(uri)
     host, port = probe.hostname, probe.port or 19530
     try:

@@ -6,8 +6,7 @@
 流程：
   1. 扫描 knowledge/ 下的所有 .md 文件，按二级标题切分。
   2. 调用 Embeddings 将每个 chunk 向量化。
-  3. MilvusBackend.upsert 全量重建索引
-     （uri 指向本地 .db = milvus-lite，指向 http:// = standalone，同一套代码）。
+  3. MilvusBackend.upsert 全量重建索引（standalone，见 deploy/milvus）。
 """
 
 import sys
@@ -24,10 +23,7 @@ from app.agent.rag.milvus_backend import MilvusBackend  # noqa: E402
 
 def main():
     kb_dir = ROOT / settings.kb_dir
-    # lite（本地相对路径）按项目根解析；standalone（http://）原样透传
     uri = settings.milvus_uri
-    if not uri.startswith("http"):
-        uri = str(ROOT / uri)
 
     if not kb_dir.exists():
         print(f"❌ 知识库目录不存在: {kb_dir}")
@@ -37,7 +33,7 @@ def main():
 
     print("=" * 60)
     print("  并夕夕 · 知识库索引构建")
-    print(f"  后端      : milvus ({'lite' if not uri.startswith('http') else 'standalone'})")
+    print("  后端      : milvus (standalone)")
     print(f"  源目录    : {kb_dir}")
     print(f"  索引目标  : {uri} (collection={settings.milvus_collection})")
     print(f"  Embedding : {settings.embedding_model}")
