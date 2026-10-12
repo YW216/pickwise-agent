@@ -33,6 +33,7 @@ schema 编写约定：
 """
 
 import json
+from functools import partial
 from typing import Callable
 
 from app.agent.tools.catalog import search_catalog
@@ -48,8 +49,7 @@ from app.agent.tools.validation import ArgumentError, validate_arguments
 # 工具名 → 业务函数。
 # 所有工具函数签名均为 (参数...) -> dict（返回统一信封），
 # 因此用 Callable[..., dict] 比裸 Callable 更精确（Callable 等价于 Callable[..., Any]）。
-# 机制型工具（load_skill / recall_user_memory）由 Agent 初始化时通过
-# set_skill_manager / set_memory_manager 注入依赖，注册表只做分发。
+# 用户工具由 ToolManager 绑定实例依赖；默认调用不隐式选择用户。
 _TOOL_MAP: dict[str, Callable[..., dict]] = {
     "search_catalog": search_catalog,
     "get_user_favorites": get_user_favorites,
@@ -60,6 +60,19 @@ _TOOL_MAP: dict[str, Callable[..., dict]] = {
     "load_skill": load_skill,
     "recall_user_memory": recall_user_memory,
 }
+
+
+def bind_tool_handlers(*, memory_manager=None, skill_manager=None,
+                       user_id=None, database_url=None) -> dict[str, Callable[..., dict]]:
+    """创建独立的执行映射，共享 schema，隔离有用户状态的依赖。"""
+    return {
+        **_TOOL_MAP,
+        "recall_user_memory": partial(recall_user_memory, manager=memory_manager),
+        "load_skill": partial(load_skill, manager=skill_manager),
+        "get_user_favorites": partial(
+            get_user_favorites, user_id=user_id, database_url=database_url,
+        ),
+    }
 
 TOOL_DEFINITIONS: list[dict] = [
     {
@@ -341,6 +354,7 @@ def _signature(name: str, arguments: dict) -> str:
 
 def execute_tool(
     name: str, arguments: dict, seen: dict[str, int] | None = None,
+    *, handlers: dict[str, Callable[..., dict]] | None = None,
 ) -> dict:
     """根据工具名称分发执行，返回统一信封 dict（执行层的唯一收口）。
 
@@ -348,7 +362,7 @@ def execute_tool(
     同一签名本轮内超过 MAX_SAME_CALLS 次则熔断（`seen` 为 None 时不熔断）；
     漏网异常在此兜底；参数被归一化或夹紧时给信封追加 notice。
     """
-    func = _TOOL_MAP.get(name)
+    func = (_TOOL_MAP if handlers is None else handlers).get(name)
     if not func:
         return fail(f"未知工具: {name}")
     if not isinstance(arguments, dict):

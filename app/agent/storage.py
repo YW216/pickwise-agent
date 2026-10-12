@@ -1,10 +1,41 @@
 import json
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from app.identity import SessionIdentity, SessionOwnershipError
+
 SESSION_VERSION = 4
+
+
+def atomic_write_json(file_path: Path, payload: dict) -> None:
+    """使用唯一临时文件写入，关闭句柄后替换（兼容 Windows）。"""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=file_path.parent,
+            prefix=f".{file_path.name}.", suffix=".tmp", delete=False,
+        ) as stream:
+            tmp_path = Path(stream.name)
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, file_path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+def _check_identity(data: dict, identity: SessionIdentity | None) -> None:
+    owned = isinstance(data, dict) and ("user_id" in data or "session_id" in data)
+    if identity is None:
+        if owned:
+            raise SessionOwnershipError("多用户会话必须提供所属用户和会话身份")
+    elif not owned or (data.get("user_id"), data.get("session_id")) != (
+        identity.user_id, identity.session_id,
+    ):
+        raise SessionOwnershipError("会话文件归属不匹配")
 
 
 def _valid_state(messages, summary, products) -> bool:
@@ -33,6 +64,8 @@ def save_session(
     summary: Optional[str],
     short_term_memory: Optional[dict] = None,
     products: Optional[dict] = None,
+    *,
+    identity: SessionIdentity | None = None,
 ) -> None:
     """把对话状态原子写入 JSON 文件。
 
@@ -43,7 +76,8 @@ def save_session(
     if not _valid_state(messages, summary, products or {}):
         raise ValueError("会话 messages/summary/products 不合法")
     file_path = Path(path)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+    if file_path.exists():
+        load_session(path, identity=identity)  # 不覆盖其他用户或无归属的旧文件
 
     payload = {
         "version": SESSION_VERSION,
@@ -53,15 +87,13 @@ def save_session(
         "products": products or {},
         "short_term_memory": short_term_memory,
     }
-
-    tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, file_path)
+    if identity is not None:
+        payload.update(user_id=identity.user_id, session_id=identity.session_id)
+    atomic_write_json(file_path, payload)
 
 
-def load_session(path: str) -> Optional[dict]:
-    """读取会话文件。不存在或损坏都返回 None（降级为新会话）。"""
+def load_session(path: str, *, identity: SessionIdentity | None = None) -> Optional[dict]:
+    """读取会话；旧 CLI 可忽略损坏文件，Web 必须先确认文件归属。"""
     file_path = Path(path)
     if not file_path.exists():
         return None
@@ -70,9 +102,12 @@ def load_session(path: str) -> Optional[dict]:
         with file_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
+        if identity is not None:
+            raise SessionOwnershipError("无法确认会话文件归属，拒绝覆盖") from e
         print(f"⚠️  会话文件损坏，已忽略（{e}）")
         return None
 
+    _check_identity(data, identity)
     if not isinstance(data, dict) or data.get("version") != SESSION_VERSION or "messages" not in data:
         print("⚠️  会话文件格式不识别，已忽略")
         return None
@@ -91,7 +126,7 @@ def load_session(path: str) -> Optional[dict]:
     }
 
 
-def delete_session(path: str) -> None:
+def delete_session(path: str, *, identity: SessionIdentity | None = None) -> None:
     """删除会话文件，不存在时静默。
 
     删除属清理性质：受限环境（删除被拦截）下降级为改名移开——
@@ -100,6 +135,7 @@ def delete_session(path: str) -> None:
     file_path = Path(path)
     if not file_path.exists():
         return
+    load_session(path, identity=identity)
     try:
         file_path.unlink()
     except OSError:

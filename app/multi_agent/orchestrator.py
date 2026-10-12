@@ -32,22 +32,48 @@ from app.multi_agent.router import DEFAULT_SCENARIO, Router
 from app.agent.tools.manager import ToolManager
 from app.multi_agent.context_pack import ContextPack, build_working_messages
 from app.prompts.agents import RESULT_PROMPT
+from app.identity import SessionIdentity, validate_user_id
 
 
 class MultiAgentOrchestrator:
     """多 Agent 编排器：协调 Router、子 Agent、黑板与 Result Agent。"""
 
-    def __init__(self, session_path: Optional[str] = None):
-        settings.assert_openai_configured()
-        self.client = openai.OpenAI(
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_base_url,
-            timeout=settings.openai_timeout,
-            max_retries=settings.openai_max_retries,
-        )
+    def __init__(
+        self, session_path: Optional[str] = None, *,
+        identity: SessionIdentity | None = None,
+        web_session_dir: str | None = None,
+        user_id: str | None = None,
+        memory_dir: str | None = None,
+        memory_enabled: bool | None = None,
+        skills_enabled: bool | None = None,
+        mcp_enabled: bool | None = None,
+        database_url: str | None = None,
+        client=None,
+    ):
+        self.identity = identity
+        if identity is not None:
+            if session_path is not None or memory_dir is not None or user_id is not None:
+                raise ValueError("Web 身份的用户和文件路径由 identity 生成，请使用 web_session_dir")
+            root = settings.web_session_dir if web_session_dir is None else web_session_dir
+            self.session_path = str(identity.session_path(root))
+            memory_dir = str(identity.memory_dir(root))
+            self.user_id = identity.user_id
+        else:
+            self.session_path = session_path or settings.session_path
+            self.user_id = validate_user_id(settings.memory_user_id if user_id is None else user_id)
+            memory_dir = settings.memory_dir if memory_dir is None else memory_dir
+        loaded = load_session(self.session_path, identity=self.identity)
+        if client is None:
+            settings.assert_openai_configured()
+            client = openai.OpenAI(
+                api_key=settings.openai_api_key,
+                base_url=settings.openai_base_url,
+                timeout=settings.openai_timeout,
+                max_retries=settings.openai_max_retries,
+            )
+        self.client = client
         self.model = settings.model_name
         self.temperature = settings.temperature
-        self.session_path = session_path or settings.session_path
         self.context_window = settings.context_window
         self.reserve_tokens = settings.reserve_tokens
         self.compaction_enabled = settings.compaction_enabled
@@ -58,65 +84,70 @@ class MultiAgentOrchestrator:
         self.max_react_steps = settings.max_react_steps
         self.max_user_input_tokens = settings.max_user_input_tokens
 
-        self.router = Router(self.client, self.model)
+        from app.agent.memory import MemoryManager
+        from app.agent.skills import SkillManager
 
         self.agents: dict[str, SubAgent] = {}
-        #工具白名单隔离注册
-        for key, cfg in AGENT_CONFIGS.items():
-            tm = ToolManager(
-                use_mcp=settings.mcp_enabled,
-                mcp_server_url=settings.mcp_server_url,
-                allowed_tools=cfg["tools"],
+        try:
+            self.router = Router(self.client, self.model)
+            self.memory_manager = MemoryManager(
+                client=self.client, model=self.model, user_id=self.user_id,
+                memory_dir=memory_dir,
+                memory_enabled=settings.memory_enabled if memory_enabled is None else memory_enabled,
+                max_ltm_facts=settings.max_ltm_facts,
             )
-            self.agents[key] = SubAgent(
-                name=cfg["name"],
-                tool_manager=tm,
-                client=self.client,
-                model=self.model,
-                temperature=self.temperature,
-                tool_result_max_chars=self.tool_result_max_chars,
-                context_window=self.context_window,
-                reserve_tokens=self.reserve_tokens,
-                reasoning_effort=settings.reasoning_effort,
+            self.skill_manager = SkillManager(
+                skills_dir=settings.skills_dir,
+                enabled=settings.skills_enabled if skills_enabled is None else skills_enabled,
             )
+            self.database_url = settings.database_url if database_url is None else database_url
+            for key, cfg in AGENT_CONFIGS.items():
+                tm = ToolManager(
+                    use_mcp=settings.mcp_enabled if mcp_enabled is None else mcp_enabled,
+                    mcp_server_url=settings.mcp_server_url,
+                    allowed_tools=cfg["tools"],
+                    memory_manager=self.memory_manager,
+                    skill_manager=self.skill_manager,
+                    user_id=self.user_id,
+                    database_url=self.database_url,
+                )
+                self.agents[key] = SubAgent(
+                    name=cfg["name"],
+                    tool_manager=tm,
+                    client=self.client,
+                    model=self.model,
+                    temperature=self.temperature,
+                    tool_result_max_chars=self.tool_result_max_chars,
+                    context_window=self.context_window,
+                    reserve_tokens=self.reserve_tokens,
+                    reasoning_effort=settings.reasoning_effort,
+                )
 
-        from app.agent.memory import MemoryManager
-        self.memory_manager = MemoryManager(
-            client=self.client,
-            model=self.model,
-            user_id=settings.memory_user_id,
-            memory_dir=settings.memory_dir,
-            memory_enabled=settings.memory_enabled,
-            max_ltm_facts=settings.max_ltm_facts,
-        )
+            self.raw_messages: list[dict] = []
+            self.summary: Optional[str] = None
+            # 商品记忆：跨压缩累积的商品 ID/名称/提及价（product_tracker 独立存储）
+            self.products: dict = {}
+            # 每轮重置；仅用于诊断/评测，不把内部异常写进用户回复。
+            self.last_failures: list[dict] = []
 
-        if settings.memory_enabled:
-            from app.agent.tools.memory_tool import set_memory_manager
-            set_memory_manager(self.memory_manager)
-
-        from app.agent.skills import SkillManager
-        self.skill_manager = SkillManager(
-            skills_dir=settings.skills_dir,
-            enabled=settings.skills_enabled,
-        )
-        if settings.skills_enabled:
-            from app.agent.tools.skill_tool import set_skill_manager
-            set_skill_manager(self.skill_manager)
-
-        self.raw_messages: list[dict] = []
-        self.summary: Optional[str] = None
-        # 商品记忆：跨压缩累积的商品 ID/名称/提及价（product_tracker 独立存储）
-        self.products: dict = {}
-        # 每轮重置；仅用于诊断/评测，不把内部异常写进用户回复。
-        self.last_failures: list[dict] = []
-
-        loaded = load_session(self.session_path)
-        if loaded:
-            self.summary = loaded["summary"]
-            self.raw_messages = loaded["messages"]
-            self.products = loaded.get("products", {})
-            if loaded.get("short_term_memory"):
-                self.memory_manager.restore_stm(loaded["short_term_memory"])
+            if loaded:
+                self.summary = loaded["summary"]
+                self.raw_messages = loaded["messages"]
+                self.products = loaded.get("products", {})
+                if loaded.get("short_term_memory"):
+                    self.memory_manager.restore_stm(loaded["short_term_memory"])
+        except Exception:
+            # 构造失败时只清理资源，不巩固尚未开始的会话。
+            for agent in self.agents.values():
+                try:
+                    agent.tool_manager.close()
+                except Exception:
+                    pass
+            try:
+                self.client.close()
+            except Exception:
+                pass
+            raise
 
     @property
     def history_size(self) -> int:
@@ -263,17 +294,18 @@ class MultiAgentOrchestrator:
         return reply
 
     def reset(self):
+        delete_session(self.session_path, identity=getattr(self, "identity", None))
         self.raw_messages = []
         self.summary = None
         self.products = {}
         self.memory_manager.reset_short_term()
-        delete_session(self.session_path)
 
     def save(self) -> None:
         save_session(
             self.session_path, self.raw_messages, self.summary,
             short_term_memory=self.memory_manager.stm_to_dict(),
             products=self.products,
+            identity=getattr(self, "identity", None),
         )
 
     def close(self):
