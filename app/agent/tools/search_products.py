@@ -9,17 +9,24 @@
 chunk_id = product_id，text = 商品卡片。Milvus 只存检索面；命中后按
 product_id 批量回查 PG 真值组装轻卡片（不依赖进程内快照，价格永远最新）。
 
+硬条件下推（P2-3，2026-10-12）：品类/价格不再用 Milvus 标量表达式过滤
+（旧索引的过期标量会漏召回——改价未同步时按旧价放行或误杀），改为先按
+PG 当前真值算出符合条件的 ID 集合，再下推 `product_id in [...]` 表达式。
+表达式只用仓储返回的 ID 列表构造，不拼接任何用户原文。
+
 评价暂不入库（2026-09-15 起评价与保修数据下线）。
 """
 
 from __future__ import annotations
 
+import json
+
 from app.agent.rag.embedder import Embedder
 from app.agent.rag.milvus_utils import ensure_reachable
 from app.agent.tools.catalog import brief_view
-from app.db.catalog_repo import get_products_by_ids
 from app.agent.tools.result import fail, ok
 from app.config.settings import settings
+from app.db.catalog_repo import find_eligible_product_ids, get_products_by_ids
 
 _client = None
 _embedder = None
@@ -53,18 +60,6 @@ def _get_embedder() -> Embedder:
             max_retries=settings.openai_max_retries,
         )
     return _embedder
-
-
-def _build_expr(category: str | None, min_price: int | None, max_price: int | None) -> str | None:
-    """标量过滤表达式，下推到两路召回（过滤在 top-k 截断前生效）。"""
-    parts = []
-    if category:
-        parts.append(f"category == '{category}'")
-    if min_price is not None:
-        parts.append(f"price >= {int(min_price)}")
-    if max_price is not None:
-        parts.append(f"price <= {int(max_price)}")
-    return " and ".join(parts) or None
 
 
 def _hybrid_product_ids(
@@ -116,6 +111,7 @@ def search_products(
     min_price: int | None = None,
     max_price: int | None = None,
     limit: int = 5,
+    database_url: str | None = None,
 ) -> dict:
     """自然语言语义搜索商品：介绍卡片的 dense + BM25 双路召回，RRF 融合。
 
@@ -126,6 +122,11 @@ def search_products(
         min_price：可选价格下限（标量过滤；与 max_price 同值即精确价格）
         max_price：可选预算上限（标量过滤，比"五千左右"这类文本语义可靠）
         limit：返回商品数上限
+        database_url：仅程序侧可传的数据库地址（模型 schema 不含此参数）。
+            显式传入优先；缺省回退应用配置——服务于「直接函数调用」路径
+            （CLI 脚本 / 评测），ToolManager 路径由 bind_tool_handlers
+            焊死实例地址。Milvus 检索配置（uri / collection）仍是公共
+            资源，不走实例绑定。
 
     Returns:
         成功：data = {"results": [brief_view 卡片 + summary + score], "total": N}
@@ -144,25 +145,46 @@ def search_products(
             )
         client.load_collection(collection)
 
-        expr = _build_expr(category, min_price, max_price)
+        url = database_url or settings.database_url
+        if not url:
+            return fail("商品服务暂未配置，请稍后再试", {"results": [], "total": 0})
+
+        # 硬条件（品类/价格）按 PG 当前真值先算 ID 集合，再下推给 Milvus 做
+        # `product_id in [...]` 过滤——旧索引的过期标量（改价/改品类尚未同步）
+        # 不再漏召回；空集合直接短路为无匹配，不会误当「取消过滤」。
+        expr = None
+        if category is not None or min_price is not None or max_price is not None:
+            eligible = find_eligible_product_ids(
+                url, category=category, min_price=min_price, max_price=max_price,
+            )
+            if not eligible:
+                return fail(
+                    "没有符合品类/预算条件的商品",
+                    {"results": [], "total": 0, "query": query},
+                )
+            # 表达式只由仓储返回的 ID 列表构成（json 序列化自带转义），
+            # 不拼接用户原文——注入面在源头消除
+            expr = f"product_id in {json.dumps(eligible, ensure_ascii=False)}"
+
+        # 召回窗口远大于输出量：复核过滤掉个别命中后，槽位由窗口内后续命中
+        # 按序补足；窗口取尽仍不足就如实返回较少结果。
+        recall = max(limit * 4, 12)
+        vector = _get_embedder().encode_one(query)
         ids = _hybrid_product_ids(
-            query,
-            _get_embedder().encode_one(query),
-            top_k=limit,
-            expr=expr,
+            query, vector, top_k=recall, recall_k=recall, expr=expr,
         )
 
         # 回查 PG 真值组装轻卡片（与 search_catalog 的 brief_view 同构）。
         # 不读进程内快照 PRODUCTS：快照仅在进程启动时加载，PG 改价后即过期；
         # 按命中 id 批量直查（一次 SQL 只取命中几条），价格/名称永远是真值。
-        products_by_id = get_products_by_ids(settings.database_url, ids)
+        products_by_id = get_products_by_ids(url, ids)
         results = []
         for pid in ids:  # 按 Milvus 检索排序输出，不跟 dict 迭代序
             product = products_by_id.get(pid)
             if not product:
                 continue  # 索引尚有、PG 已删/下架：下轮同步清出，先不露出
-            # 防御性二次过滤：预算/品类过滤下推在 Milvus expr，若索引滞后
-            # （改价/改品类还没同步），expr 会按旧值放行——按真值再校验一遍
+            # 防御性复核：ID 集合来自 PG 当前值，正常必然命中；保留以防
+            # 检索面与真值之间出现视图不一致（如两库之间的并发写）
             if category and product["category"] != category:
                 continue
             if min_price is not None and product["price"] < min_price:
@@ -170,6 +192,8 @@ def search_products(
             if max_price is not None and product["price"] > max_price:
                 continue
             results.append(brief_view(product))
+            if len(results) >= limit:
+                break
     except ConnectionError as exc:
         return fail(str(exc), {"results": [], "total": 0})
     except Exception as exc:  # noqa: BLE001

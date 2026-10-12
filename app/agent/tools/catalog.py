@@ -3,7 +3,11 @@
 **SQL 直查版（2026-09-15）**：参数与 PG products 表列一一对应
 （query=商品名 ILIKE 字面、brand=品牌精确、category 精确、price 数值上限），
 确定性过滤在数据库执行——PG 数据变更即时可见，无需重启进程。PG 不可达时
-回退本地内存过滤（同一套条件的 Python 实现，行为一致）。
+显式失败（fail），不回退旧快照。
+
+数据库地址（P2-2，2026-10-12）：显式传入的 database_url 优先；缺省回退
+应用配置——服务于「直接函数调用」路径（CLI 脚本 / 评测），ToolManager
+路径由 bind_tool_handlers 焊死实例地址，永远显式传值。
 
 可搜索字段边界（确定且可枚举）：
 - 商品名：字面子串（query，ILIKE 大小写不敏感）
@@ -63,8 +67,9 @@ def search_catalog(
     budget_min: float | None = None,
     budget_max: float | None = None,
     limit: int = 10,
+    database_url: str | None = None,
 ) -> dict:
-    """按字段对齐的确定性条件检索商品目录（SQL 直查，PG 不可达回退本地）。
+    """按字段对齐的确定性条件检索商品目录（SQL 直查，不可达时显式失败）。
 
     Args:
         query：品牌/型号字面关键词（如「墨白」「凌霄」）——仅匹配商品名与品牌
@@ -73,6 +78,7 @@ def search_catalog(
         budget_min：价格下限（价格高于等于该值；与 budget_max 同值即精确价格）
         budget_max：预算上限（价格低于等于该值）
         limit：返回条数
+        database_url：仅程序侧可传的数据库地址（模型 schema 不含此参数）
 
     Returns:
         成功：data = {"candidates": [...], "total": N}
@@ -81,34 +87,34 @@ def search_catalog(
                    data = {"candidates": [], "total": 0, "nearest": [...]})
         彻底无匹配：fail("没有符合条件的商品，请调整预算或条件")
     """
+    url = database_url or settings.database_url
+    if not url:
+        return fail("商品服务暂未配置，请稍后再试", {"candidates": [], "total": 0})
+
     # ---------- PG 直查（首选：数据即时可见、确定性由 SQL 保证） ----------
-    if settings.database_url:
-        try:
-            from app.db.catalog_repo import search_candidates, search_nearest
+    try:
+        from app.db.catalog_repo import search_candidates, search_nearest
 
-            res = search_candidates(settings.database_url, query, brand,
-                                    category, budget_min, budget_max, limit)
-            if res["total"]:
-                returned, matched = res["total"], res.get("matched", res["total"])
-                hint = (
-                    _TRUNCATED_HINT.format(matched=matched, returned=returned)
-                    if matched > returned else _CARDS_HINT
-                )
-                return ok({**res, "hint": hint})
-            near = search_nearest(settings.database_url, query, brand,
-                                  category, budget_min, budget_max, 3)
-            if near["candidates"]:
-                return fail(
-                    "没有完全符合条件的产品，以下是条件外最接近的几款（供参考）",
-                    {"candidates": [], "total": 0, "nearest": near["candidates"]},
-                )
-            return fail(
-                "没有符合条件的商品，请调整预算或条件",
-                {"candidates": [], "total": 0},
+        res = search_candidates(url, query, brand,
+                                category, budget_min, budget_max, limit)
+        if res["total"]:
+            returned, matched = res["total"], res.get("matched", res["total"])
+            hint = (
+                _TRUNCATED_HINT.format(matched=matched, returned=returned)
+                if matched > returned else _CARDS_HINT
             )
-        except Exception as exc:  # noqa: BLE001 —— PG 唯一数据源：失败显式 fail（不静默回退旧快照）
-            print(f"[search_catalog] 商品服务不可用: {type(exc).__name__}: {exc}")
-            return fail("商品服务暂时不可用，请稍后再试", {"candidates": [], "total": 0})
-
-    # 未配置 database_url 时无数据源可用：显式失败，不引用未定义的 res
-    return fail("商品服务暂未配置，请稍后再试", {"candidates": [], "total": 0})
+            return ok({**res, "hint": hint})
+        near = search_nearest(url, query, brand,
+                              category, budget_min, budget_max, 3)
+        if near["candidates"]:
+            return fail(
+                "没有完全符合条件的产品，以下是条件外最接近的几款（供参考）",
+                {"candidates": [], "total": 0, "nearest": near["candidates"]},
+            )
+        return fail(
+            "没有符合条件的商品，请调整预算或条件",
+            {"candidates": [], "total": 0},
+        )
+    except Exception as exc:  # noqa: BLE001 —— PG 唯一数据源：失败显式 fail（不静默回退旧快照）
+        print(f"[search_catalog] 商品服务不可用: {type(exc).__name__}: {exc}")
+        return fail("商品服务暂时不可用，请稍后再试", {"candidates": [], "total": 0})

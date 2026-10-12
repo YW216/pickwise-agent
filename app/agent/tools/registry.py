@@ -64,7 +64,13 @@ _TOOL_MAP: dict[str, Callable[..., dict]] = {
 
 def bind_tool_handlers(*, memory_manager=None, skill_manager=None,
                        user_id=None, database_url=None) -> dict[str, Callable[..., dict]]:
-    """创建独立的执行映射，共享 schema，隔离有用户状态的依赖。"""
+    """创建独立的执行映射，共享 schema，隔离有用户状态/实例数据的依赖。
+
+    database_url 焊给全部商品读取工具（favorites / catalog / search_products /
+    detail / compare）：每个 ToolManager 一个实例地址——HTTP 多实例可指向
+    不同库；工具内不再无条件依赖全局配置（缺省回退仅服务直接函数调用路径）。
+    Milvus 检索配置仍是公共资源，不做实例绑定（第四步统一管初始化/关闭）。
+    """
     return {
         **_TOOL_MAP,
         "recall_user_memory": partial(recall_user_memory, manager=memory_manager),
@@ -72,6 +78,10 @@ def bind_tool_handlers(*, memory_manager=None, skill_manager=None,
         "get_user_favorites": partial(
             get_user_favorites, user_id=user_id, database_url=database_url,
         ),
+        "search_catalog": partial(search_catalog, database_url=database_url),
+        "search_products": partial(search_products, database_url=database_url),
+        "get_detail": partial(get_detail, database_url=database_url),
+        "compare_products": partial(compare_products, database_url=database_url),
     }
 
 TOOL_DEFINITIONS: list[dict] = [

@@ -105,6 +105,34 @@ def search_nearest(
     return {"candidates": candidates, "total": len(candidates)}
 
 
+def find_eligible_product_ids(
+    database_url: str,
+    category: str | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
+) -> list[str]:
+    """按 PG 当前真值筛出符合硬条件的商品 ID（语义检索的 ID 过滤集）。
+
+    与 search_candidates 的分工：本函数不算名称/品牌字面（那是确定性检索
+    的职责），只算「品类精确 + 价格区间」的硬条件集合。返回的 ID 列表供
+    Milvus 表达式 `product_id in [...]` 使用——过滤按当前值生效，旧索引
+    的过期标量（改价/改品类尚未同步）不再漏召回；空列表由调用方短路为
+    无匹配，不得误当「取消过滤」。
+    """
+    sql = """
+        SELECT product_id FROM products
+        WHERE (%(cat)s::text IS NULL OR category = %(cat)s::text)
+          AND (%(bmin)s::numeric IS NULL OR price >= %(bmin)s::numeric)
+          AND (%(bmax)s::numeric IS NULL OR price <= %(bmax)s::numeric)
+        ORDER BY product_id
+    """
+    with connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, {"cat": category,
+                              "bmin": min_price, "bmax": max_price})
+            return [row[0] for row in cur.fetchall()]
+
+
 def get_products_by_ids(database_url: str, ids: list[str]) -> dict:
     """按 ID 批量取完整商品（含 specs/introduction 全字段），缺 ID 不在结果中。"""
     if not ids:

@@ -43,6 +43,7 @@ from app.agent.rag.embedder import Embedder  # noqa: E402
 from app.agent.rag.milvus_backend import MilvusBackend  # noqa: E402
 from app.agent.rag.milvus_utils import ensure_reachable  # noqa: E402
 from app.db.snapshot import PRODUCTS  # noqa: E402
+from app.db.catalog_repo import find_eligible_product_ids  # noqa: E402
 from app.agent.tools.search_products import _hybrid_product_ids  # noqa: E402
 from app.config.settings import settings  # noqa: E402
 
@@ -149,9 +150,18 @@ def main():
         return kb_backend.hybrid_search(text, vec, top_k=args.top_k, recall_k=rk)
 
     def _retrieve_product(mode, text, vec, case):
-        # 对齐生产：Agent 从 query 识别价格意图后传 max_price 标量过滤（expr 下推两路）
+        # 对齐生产（P2-3）：硬条件按 PG 当前真值先算 ID 集合，再下推
+        # `product_id in [...]`——评测的就是生产行为；空集合与生产一致，
+        # 直接短路为无命中，不发起检索
         mp = case.get("max_price")
-        expr = f"price <= {int(mp)}" if mp else None
+        expr = None
+        if mp:
+            eligible = find_eligible_product_ids(
+                settings.database_url, max_price=int(mp),
+            )
+            if not eligible:
+                return []
+            expr = f"product_id in {json.dumps(eligible, ensure_ascii=False)}"
         if mode == "dense":
             hits = product_client.search(
                 collection_name=settings.product_collection,

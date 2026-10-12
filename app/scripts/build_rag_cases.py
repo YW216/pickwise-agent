@@ -30,6 +30,7 @@ from openai import OpenAI  # noqa: E402
 
 from app.agent.rag.chunker import chunk_markdown_dir  # noqa: E402
 from app.db.snapshot import PRODUCTS  # noqa: E402
+from app.db.catalog_repo import find_eligible_product_ids  # noqa: E402
 from app.config.settings import settings  # noqa: E402
 
 # 卡片渲染与索引构建共用同一模板（service 层定义），保证评测 query 与索引内容同源
@@ -188,7 +189,16 @@ def main():
         expanded = 0
         for i, (case, vec) in enumerate(zip(pcases, vecs)):
             mp = case.get("max_price")
-            expr = f"price <= {int(mp)}" if mp else None
+            # 对齐生产（P2-3）：硬条件按 PG 当前真值算 ID 集合下推，
+            # 空集合与生产一致直接短路（无命中可复核）
+            expr = None
+            if mp:
+                eligible = find_eligible_product_ids(
+                    settings.database_url, max_price=int(mp),
+                )
+                if not eligible:
+                    continue
+                expr = f"product_id in {json.dumps(eligible, ensure_ascii=False)}"
             ids = _hybrid_product_ids(case["query"], vec, top_k=5, expr=expr)
             expected = set(case.get("expected_product_ids") or [case["expected_product_id"]])
             cards = "\n\n".join(

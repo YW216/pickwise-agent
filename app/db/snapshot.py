@@ -4,6 +4,12 @@
 两份数据并存必然漂移，索引错位事故的根源）。加载失败 = 目录服务不可用，
 消费方（工具）显式失败，不再静默回退旧快照。
 
+**定位（2026-10-12，P2-2 起生效）：仅供离线任务与测试**——评测指标
+（evaluation/metrics）、索引构建与脚本（build_product_kb / build_rag_cases /
+expand_product_pool / run_rag_eval）、批次真值测试。在线工具路径
+（detail / catalog / search_products）已全部直查 PG，**禁止新增对
+snapshot 的 import**——快照在进程启动时加载，PG 改价后即过期。
+
 快照语义：进程生命周期内数据不变；PG 数据变更需重启进程（未来 FastAPI
 服务化时改为 repository 直查 / TTL 缓存，接口不变）。
 
