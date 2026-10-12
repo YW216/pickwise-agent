@@ -87,6 +87,8 @@ class Settings(BaseSettings):
 
     # 多轮对话管理
     session_path: str = "app/sessions/session.json"
+    # Web 身份的会话和长期记忆与 CLI 数据分目录保存。
+    web_session_dir: str = "app/sessions/web"
     # context_window 是策略阈值（deepseek-v4-flash 真实窗口 1M）：提前压缩控制成本与延迟，
     # 非硬件上限。当前按"选购助手会话"形态取 200K——单会话 10-30 轮，压缩极少触发；
     # 若演变为跨天陪伴式会话，上调至 500K 并同步放大 keep_recent_tokens（2026-09-07 裁定）。

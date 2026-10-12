@@ -59,12 +59,11 @@ class Sandbox:
         # 类用例的工具断言永远失败），但 memory_dir 指向每条用例独立的沙箱目录：
         # 既不读真实用户记忆（可复现），也隔离用例间状态。MCP 仍关闭（幻觉
         # 检测需要确定的 ground truth）。
-        settings.memory_enabled = True
-        settings.memory_dir = str(Path(session_path).with_suffix("")) + "_memory"
-        settings.mcp_enabled = False
-
         from app.multi_agent.orchestrator import MultiAgentOrchestrator
-        return MultiAgentOrchestrator(session_path=session_path)
+        return MultiAgentOrchestrator(
+            session_path=session_path, memory_enabled=True, mcp_enabled=False,
+            memory_dir=str(Path(session_path).with_suffix("")) + "_memory",
+        )
 
     def run(self, case: EvalCase) -> RunTrace:
         """跑一条用例，返回采集到的运行轨迹。"""

@@ -1,6 +1,6 @@
 """ToolManager：管理本地工具（PickWise）。
 
-当前范围：**只实现本地工具**（mock 数据）。
+当前范围：本地工具；用户依赖随实例绑定。
 MCP 后续接入时在此扩展 `_init_mcp`；`use_mcp` 参数保留占位，
 保证将来加 MCP 不破坏调用方。
 
@@ -17,6 +17,7 @@ from typing import Optional
 from app.agent.tools.registry import TOOL_DEFINITIONS as LOCAL_TOOL_DEFINITIONS
 from app.agent.tools.registry import execute_tool as local_execute_tool
 from app.agent.tools.registry import to_tool_message_content
+from app.agent.tools.registry import bind_tool_handlers
 from app.agent.tools.result import fail
 from app.agent.tools.validation import parse_tool_arguments
 
@@ -29,6 +30,11 @@ class ToolManager:
         allowed_tools: Optional[set] = None,
         use_mcp: bool = False,
         mcp_server_url: str = "",
+        *,
+        memory_manager=None,
+        skill_manager=None,
+        user_id: str | None = None,
+        database_url: str | None = None,
     ):
         """初始化工具管理器。
 
@@ -39,6 +45,10 @@ class ToolManager:
         """
         self._tool_defs: list[dict] = []
         self._tool_source: dict[str, str] = {}
+        self._handlers = bind_tool_handlers(
+            memory_manager=memory_manager, skill_manager=skill_manager,
+            user_id=user_id, database_url=database_url,
+        )
 
         # MCP 暂不实现：use_mcp=True 时降级为本地工具并提示
         if use_mcp and mcp_server_url:
@@ -80,7 +90,7 @@ class ToolManager:
         source = self._tool_source.get(name)
 
         if source == "local":
-            return local_execute_tool(name, arguments, seen)
+            return local_execute_tool(name, arguments, seen, handlers=self._handlers)
 
         return fail(f"未知工具: {name}")
 
