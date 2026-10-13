@@ -31,11 +31,11 @@ def get_detail(product_id: str, database_url: str | None = None) -> dict:
     """
     url = database_url or settings.database_url
     if not url:
-        return fail("商品服务暂未配置，请稍后再试")
+        return fail("商品服务暂未配置，请稍后再试", {"unavailable": True})
     try:
         products = get_products_by_ids(url, [product_id])
     except Exception:  # noqa: BLE001 —— PG 唯一数据源：失败显式 fail（不静默回退旧快照）
-        return fail("商品服务暂时不可用，请稍后再试")
+        return fail("商品服务暂时不可用，请稍后再试", {"unavailable": True})
 
     product = products.get(product_id)
     if not product:
@@ -69,11 +69,11 @@ def compare_products(product_ids: list[str], database_url: str | None = None) ->
 
     url = database_url or settings.database_url
     if not url:
-        return fail("商品服务暂未配置，请稍后再试")
+        return fail("商品服务暂未配置，请稍后再试", {"unavailable": True})
     try:
         products_by_id = get_products_by_ids(url, ordered)
     except Exception:  # noqa: BLE001 —— 同上：显式 fail，不回退
-        return fail("商品服务暂时不可用，请稍后再试")
+        return fail("商品服务暂时不可用，请稍后再试", {"unavailable": True})
 
     # 缺任何一款即失败：比选必须对齐全部请求项，给模型缺失明细供其重试或告知
     missing = [pid for pid in ordered if pid not in products_by_id]

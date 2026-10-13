@@ -8,3 +8,9 @@ pymilvus[milvus-lite]>=2.6,<3.0
 
 # 真值层数据库驱动（PostgreSQL，2026-09-15 商品落库）
 psycopg[binary]>=3.1
+
+# Web 服务层（第四步：FastAPI 服务化，多租户隔离和fastapi接入.md §4）
+fastapi>=0.115
+uvicorn>=0.32
+# 匿名 Cookie 凭证签名（成熟签名库，不手写加解密）
+itsdangerous>=2.2

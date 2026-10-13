@@ -294,7 +294,18 @@ class MultiAgentOrchestrator:
         return reply
 
     def reset(self):
-        delete_session(self.session_path, identity=getattr(self, "identity", None))
+        """重置会话：Web 身份原子保存空状态保留归属，CLI 删除文件。
+
+        顺序铁律（§3.7）：先持久化成功，再清内存——失败时异常向上抛、
+        内存状态保留，避免「重启恢复旧聊天」；重置不调用 LLM，不清
+        用户长期记忆或收藏。
+        """
+        if self.identity is not None:
+            save_session(self.session_path, [], None,
+                         short_term_memory=None, products={},
+                         identity=self.identity)
+        else:
+            delete_session(self.session_path, identity=None)
         self.raw_messages = []
         self.summary = None
         self.products = {}

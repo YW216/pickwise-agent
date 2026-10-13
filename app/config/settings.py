@@ -89,6 +89,18 @@ class Settings(BaseSettings):
     session_path: str = "app/sessions/session.json"
     # Web 身份的会话和长期记忆与 CLI 数据分目录保存。
     web_session_dir: str = "app/sessions/web"
+
+    # ---------- Web 服务（第四步，多租户隔离和fastapi接入.md §4） ----------
+    # 匿名凭证签名密钥：至少 32 字节高强度随机材料；Web 启动时缺失或过弱
+    # 明确失败（不临时生成——密钥跨重启必须稳定，否则已签发凭证全部失效）。
+    auth_secret_key: str = ""
+    # 匿名凭证有效期（天）与 Cookie Secure 标记（HTTPS 部署置 true）。
+    auth_cookie_max_age_days: int = 30
+    auth_cookie_secure: bool = False
+    # 允许的前端 Origin（CORS 与 CSRF 校验共用）；空列表 = 仅同源访问。
+    allowed_origins: list[str] = []
+    # 商品/收藏接口的有界线程执行器规模；四个名额都在用时报 PRODUCT_SERVICE_BUSY。
+    product_executor_workers: int = Field(default=4, gt=0)
     # context_window 是策略阈值（deepseek-v4-flash 真实窗口 1M）：提前压缩控制成本与延迟，
     # 非硬件上限。当前按"选购助手会话"形态取 200K——单会话 10-30 轮，压缩极少触发；
     # 若演变为跨天陪伴式会话，上调至 500K 并同步放大 keep_recent_tokens（2026-09-07 裁定）。
@@ -168,6 +180,18 @@ class Settings(BaseSettings):
         if not self.openai_api_key:
             raise RuntimeError(
                 self._MISSING_CREDENTIAL.format(key="OPENAI_API_KEY")
+            )
+
+    def assert_auth_configured(self) -> None:
+        """Web 服务启动时使用：签名密钥缺失或过弱都阻止启动（§4.2）。"""
+        if not self.auth_secret_key:
+            raise RuntimeError(
+                self._MISSING_CREDENTIAL.format(key="AUTH_SECRET_KEY")
+            )
+        if len(self.auth_secret_key.encode()) < 32:
+            raise RuntimeError(
+                "AUTH_SECRET_KEY 过弱：至少 32 字节高强度随机材料"
+                "（如 python -c \"import secrets; print(secrets.token_urlsafe(48))\"）"
             )
 
     # 已知无 embedding 端点的 provider 主机名片段（实测 DeepSeek 返回 404，

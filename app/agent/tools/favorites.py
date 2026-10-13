@@ -23,11 +23,13 @@ def get_user_favorites(category: str | None = None, limit: int = 20, *,
     if user_id is None:
         return fail("缺少用户收藏上下文")
     if not database_url:
-        return fail("收藏服务暂未配置")
+        return fail("收藏服务暂未配置", {"favorites": [], "total": 0,
+                                         "unavailable": True})
     try:
         items = get_favorites(database_url, user_id, category=category, limit=limit)
     except Exception:
-        return fail("收藏服务暂时不可用，请稍后再试")
+        return fail("收藏服务暂时不可用，请稍后再试",
+                    {"favorites": [], "total": 0, "unavailable": True})
     if not items:
         return fail("您的收藏夹还没有商品", {"favorites": [], "total": 0})
 

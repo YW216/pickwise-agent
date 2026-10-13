@@ -20,6 +20,7 @@ PG 当前真值算出符合条件的 ID 集合，再下推 `product_id in [...]`
 from __future__ import annotations
 
 import json
+import threading
 
 from app.agent.rag.embedder import Embedder
 from app.agent.rag.milvus_utils import ensure_reachable
@@ -30,21 +31,29 @@ from app.db.catalog_repo import find_eligible_product_ids, get_products_by_ids
 
 _client = None
 _embedder = None
+_client_lock = threading.Lock()
+_embedder_lock = threading.Lock()
 
 
 def _get_client():
-    """懒加载 MilvusClient；http uri 先做 TCP 探活快败（同 MilvusBackend）。"""
+    """懒加载 MilvusClient；http uri 先做 TCP 探活快败（同 MilvusBackend）。
+
+    HTTP 进程中多个窗口的消费者线程会并发调用：模块级缓存的一次初始化
+    必须线程安全（4.6），double-checked locking 避免重复建连。
+    """
     global _client
     if _client is None:
-        try:
-            from pymilvus import MilvusClient
-        except ImportError as e:
-            raise ImportError(
-                "pymilvus 未安装。请运行 `pip install pymilvus` 或 "
-                "`pip install -r requirements.txt`。"
-            ) from e
-        ensure_reachable(settings.milvus_uri)
-        _client = MilvusClient(settings.milvus_uri)
+        with _client_lock:
+            if _client is None:
+                try:
+                    from pymilvus import MilvusClient
+                except ImportError as e:
+                    raise ImportError(
+                        "pymilvus 未安装。请运行 `pip install pymilvus` 或 "
+                        "`pip install -r requirements.txt`。"
+                    ) from e
+                ensure_reachable(settings.milvus_uri)
+                _client = MilvusClient(settings.milvus_uri)
     return _client
 
 
@@ -52,14 +61,34 @@ def _get_embedder() -> Embedder:
     """复用 P5 知识库的 embedding 配置（与 retrieve_knowledge 同一通路）。"""
     global _embedder
     if _embedder is None:
-        _embedder = Embedder(
-            api_key=settings.effective_embedding_api_key,
-            base_url=settings.effective_embedding_base_url,
-            model=settings.effective_embedding_model,
-            timeout=settings.openai_timeout,
-            max_retries=settings.openai_max_retries,
-        )
+        with _embedder_lock:
+            if _embedder is None:
+                _embedder = Embedder(
+                    api_key=settings.effective_embedding_api_key,
+                    base_url=settings.effective_embedding_base_url,
+                    model=settings.effective_embedding_model,
+                    timeout=settings.openai_timeout,
+                    max_retries=settings.openai_max_retries,
+                )
     return _embedder
+
+
+def close_public_clients() -> None:
+    """HTTP 应用退出时显式关闭公共检索客户端（4.6）。
+
+    公共客户端是共享资源，不随某个用户窗口回收而关闭；此入口由
+    create_app 的 lifespan 在 SessionManager.close 之后调用。
+    """
+    global _client, _embedder
+    with _client_lock:
+        if _client is not None:
+            try:
+                _client.close()
+            except Exception:  # noqa: BLE001 —— 退出清理尽力而为
+                pass
+        _client = None
+    with _embedder_lock:
+        _embedder = None
 
 
 def _hybrid_product_ids(
@@ -147,7 +176,8 @@ def search_products(
 
         url = database_url or settings.database_url
         if not url:
-            return fail("商品服务暂未配置，请稍后再试", {"results": [], "total": 0})
+            return fail("商品服务暂未配置，请稍后再试",
+                        {"results": [], "total": 0, "unavailable": True})
 
         # 硬条件（品类/价格）按 PG 当前真值先算 ID 集合，再下推给 Milvus 做
         # `product_id in [...]` 过滤——旧索引的过期标量（改价/改品类尚未同步）
@@ -195,9 +225,10 @@ def search_products(
             if len(results) >= limit:
                 break
     except ConnectionError as exc:
-        return fail(str(exc), {"results": [], "total": 0})
+        return fail(str(exc), {"results": [], "total": 0, "unavailable": True})
     except Exception as exc:  # noqa: BLE001
-        return fail(f"商品语义检索暂时不可用: {exc}")
+        return fail(f"商品语义检索暂时不可用: {exc}",
+                    {"results": [], "total": 0, "unavailable": True})
 
     if not results:
         return fail(

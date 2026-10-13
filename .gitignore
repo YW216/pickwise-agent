@@ -60,3 +60,4 @@ test.py
 wtest.py
 _tmp_measure_saving.py
 demo/
+.pytest_tmp/

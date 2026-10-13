@@ -117,4 +117,5 @@ def search_catalog(
         )
     except Exception as exc:  # noqa: BLE001 —— PG 唯一数据源：失败显式 fail（不静默回退旧快照）
         print(f"[search_catalog] 商品服务不可用: {type(exc).__name__}: {exc}")
-        return fail("商品服务暂时不可用，请稍后再试", {"candidates": [], "total": 0})
+        return fail("商品服务暂时不可用，请稍后再试",
+                    {"candidates": [], "total": 0, "unavailable": True})
