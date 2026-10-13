@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -15,6 +16,12 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Windows 上 psycopg 异步模式要求 Selector 事件循环（Proactor 不支持
+# add_reader）；import 本模块即生效，任何启动方式都覆盖。uvicorn 在
+# Windows + asyncio 下也会做同样设置，此处是双保险。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from app.api import routes
 from app.api.auth import AnonymousAuth
@@ -26,6 +33,7 @@ from app.api.envelope import (
 )
 from app.config.settings import settings
 from app.multi_agent.orchestrator import MultiAgentOrchestrator
+from app.services.async_runtime import AsyncRuntime
 from app.services.session_manager import SessionManager
 
 
@@ -172,8 +180,10 @@ def create_app(*, auth_secret_key: str | None = None,
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # 启动顺序：配置校验（上方）→ SessionManager/执行器 → 清理任务（§4.6）
+        # 启动顺序：配置校验（上方）→ 异步基础层 → SessionManager/执行器 → 清理任务（§4.6）
         app.state.auth = AnonymousAuth(secret, settings.auth_cookie_max_age_days * 86400)
+        app.state.async_runtime = AsyncRuntime()
+        await app.state.async_runtime.open()  # 异步模型客户端 + PG 连接池
         app.state.session_manager = SessionManager(
             session_dir=Path(session_dir or settings.web_session_dir),
             factory=orchestrator_factory,
@@ -184,8 +194,9 @@ def create_app(*, auth_secret_key: str | None = None,
         try:
             yield
         finally:
-            # 退出逆序：SessionManager（排空并逐窗口保存关闭）→ 执行器 → 公共客户端
+            # 退出逆序：SessionManager（排空并逐窗口保存关闭）→ 异步基础层 → 执行器 → 公共客户端
             await app.state.session_manager.close()
+            await app.state.async_runtime.aclose()
             app.state.product_runner.shutdown()
             from app.agent.tools.search_products import close_public_clients
             close_public_clients()

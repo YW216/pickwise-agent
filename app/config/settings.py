@@ -101,6 +101,14 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = []
     # 商品/收藏接口的有界线程执行器规模；四个名额都在用时报 PRODUCT_SERVICE_BUSY。
     product_executor_workers: int = Field(default=4, gt=0)
+
+    # ---------- 异步基础层（异步改造阶段一） ----------
+    # LLM 并发闸门：同时在飞的模型调用上限（asyncio.Semaphore）。
+    # 线程池删除后它接管「限并发」职责；超出的协程排队等待，不占线程。
+    llm_max_concurrency: int = Field(default=8, gt=0)
+    # 异步 PG 连接池规模（阶段五切换数据访问时使用；阶段一仅建池不切流量）。
+    db_pool_min_size: int = Field(default=2, ge=0)
+    db_pool_max_size: int = Field(default=10, gt=0)
     # context_window 是策略阈值（deepseek-v4-flash 真实窗口 1M）：提前压缩控制成本与延迟，
     # 非硬件上限。当前按"选购助手会话"形态取 200K——单会话 10-30 轮，压缩极少触发；
     # 若演变为跨天陪伴式会话，上调至 500K 并同步放大 keep_recent_tokens（2026-09-07 裁定）。
