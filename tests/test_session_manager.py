@@ -31,14 +31,19 @@ def uid(name: str) -> str:
 # ---------- 假对象 ----------
 
 class FakeAgent:
-    """最小编排器替身：记录调用，支持事件/屏障控制执行交错与注入失败。"""
+    """最小编排器替身（阶段二起 chat/close 是协程）：事件控制执行交错与失败注入。
 
-    def __init__(self, identity: SessionIdentity, barrier: threading.Barrier | None = None,
-                 chat_gate: threading.Event | None = None):
+    parallel_pair = (wait_event, notify_event)：两个 Agent 互相等待——
+    并行执行时双方都能通过；串行执行会死等直到 wait_for 超时 → 测试失败。
+    """
+
+    def __init__(self, identity: SessionIdentity,
+                 chat_gate: "asyncio.Event | None" = None,
+                 parallel_pair: "tuple[asyncio.Event, asyncio.Event] | None" = None):
         self.identity = identity
-        self.barrier = barrier
+        self.parallel_pair = parallel_pair
         self.chat_gate = chat_gate
-        self.chat_started = threading.Event()
+        self.chat_started = asyncio.Event()
         self.chat_calls: list[str] = []
         self.chat_total = 0       # 累计执行数（reset 不清），用于顺序断言
         self.chat_error: Exception | None = None
@@ -55,14 +60,16 @@ class FakeAgent:
     def reset_short_term(self) -> None:
         pass
 
-    def chat(self, message: str) -> str:
+    async def chat(self, message: str) -> str:
         self.chat_started.set()
         self.chat_total += 1
         self.chat_calls.append(message)
-        if self.barrier is not None:
-            self.barrier.wait(timeout=5)  # 串行执行会在此超时破裂 → 测试失败
+        if self.parallel_pair is not None:
+            wait_ev, notify_ev = self.parallel_pair
+            notify_ev.set()          # 通知对方：我已到达
+            await asyncio.wait_for(wait_ev.wait(), timeout=5)  # 等对方
         if self.chat_gate is not None:
-            self.chat_gate.wait(timeout=5)
+            await self.chat_gate.wait()
         if self.chat_error is not None:
             raise self.chat_error
         self.raw_messages.append({"role": "user", "content": message})
@@ -81,7 +88,7 @@ class FakeAgent:
         if self.save_error is not None:
             raise self.save_error
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed += 1
 
 
@@ -231,7 +238,7 @@ def test_same_window_chat_reset_serialized_in_order(tmp_path):
     async def main():
         clock = FakeClock()
         recorder = FactoryRecorder()
-        gate = threading.Event()
+        gate = asyncio.Event()
         recorder._make = lambda identity: FakeAgent(identity, chat_gate=gate)
         mgr = make_manager(tmp_path, clock, recorder)
         identity = await mgr.create_session(uid("u1"))
@@ -257,15 +264,19 @@ def test_same_window_chat_reset_serialized_in_order(tmp_path):
 def test_different_windows_run_in_parallel(tmp_path):
     async def main():
         clock = FakeClock()
-        barrier = threading.Barrier(2)  # 两个线程必须同时到达，串行即超时破裂
-        recorder = FactoryRecorder(
-            make_agent=lambda identity: FakeAgent(identity, barrier=barrier),
-        )
-        mgr = make_manager(tmp_path, clock, recorder, max_parallel_jobs=2)
+        ev_a, ev_b = asyncio.Event(), asyncio.Event()
+        pairs = [(ev_a, ev_b), (ev_b, ev_a)]
+        # 按 factory 调用顺序分配配对：两个 Agent 互相等待对方到达——
+        # 并行执行双方都能通过；串行执行必然死等 → wait_for 超时失败
+        def make_agent(identity):
+            return FakeAgent(identity, parallel_pair=pairs[len(recorder.calls) - 1])
+
+        recorder = FactoryRecorder(make_agent=make_agent)
+        mgr = make_manager(tmp_path, clock, recorder)
         win1 = await mgr.create_session(uid("u1"))
         win2 = await mgr.create_session(uid("u2"))
-        outcomes = await asyncio.gather(
-            mgr.chat(win1, "a"), mgr.chat(win2, "b"),
+        outcomes = await asyncio.wait_for(
+            asyncio.gather(mgr.chat(win1, "a"), mgr.chat(win2, "b")), timeout=5,
         )
         assert [o.reply for o in outcomes] == ["reply:a", "reply:b"]
 
@@ -275,7 +286,7 @@ def test_different_windows_run_in_parallel(tmp_path):
 def test_queue_full_rejected(tmp_path):
     async def main():
         clock = FakeClock()
-        gate = threading.Event()
+        gate = asyncio.Event()
         recorder = FactoryRecorder(
             make_agent=lambda identity: FakeAgent(identity, chat_gate=gate),
         )
@@ -302,7 +313,7 @@ def test_queue_full_rejected(tmp_path):
 def test_capacity_full_when_no_idle_entry(tmp_path):
     async def main():
         clock = FakeClock()
-        gate = threading.Event()
+        gate = asyncio.Event()
         recorder = FactoryRecorder(
             make_agent=lambda identity: FakeAgent(identity, chat_gate=gate),
         )
@@ -437,7 +448,7 @@ def test_close_drains_queue_and_closes_once(tmp_path):
 def test_close_reports_timed_out_running_window(tmp_path):
     async def main():
         clock = FakeClock()
-        gate = threading.Event()
+        gate = asyncio.Event()
         recorder = FactoryRecorder(
             make_agent=lambda identity: FakeAgent(identity, chat_gate=gate),
         )
@@ -465,7 +476,7 @@ def test_close_reports_timed_out_running_window(tmp_path):
 def test_cancelled_pending_job_is_skipped(tmp_path):
     async def main():
         clock = FakeClock()
-        gate = threading.Event()
+        gate = asyncio.Event()
         recorder = FactoryRecorder(
             make_agent=lambda identity: FakeAgent(identity, chat_gate=gate),
         )
@@ -494,7 +505,7 @@ def test_cancelled_pending_job_is_skipped(tmp_path):
 def test_cancelling_waiting_caller_does_not_stop_execution(tmp_path):
     async def main():
         clock = FakeClock()
-        gate = threading.Event()
+        gate = asyncio.Event()
         recorder = FactoryRecorder(
             make_agent=lambda identity: FakeAgent(identity, chat_gate=gate),
         )

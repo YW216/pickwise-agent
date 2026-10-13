@@ -14,6 +14,7 @@
 用法：python tests/router_bench.py [--cases 指定分组]
 """
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -134,7 +135,7 @@ def run() -> None:
 
     for i, c in enumerate(cases, 1):
         try:
-            actual = router.route(c["input"], c["history"])
+            actual = asyncio.run(router.route(c["input"], c["history"]))
         except Exception as e:
             actual = [f"ERROR:{e}"]
         ok = actual == c["expected"]

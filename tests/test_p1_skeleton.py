@@ -1,3 +1,4 @@
+import asyncio
 """P1 骨架验证：白名单隔离 / prompt-schema 一致性 / Router 多值解析 / 端到端 smoke。
 
 对应设计文档（develop_docs/模块/4-多Agent架构设计.md）十五节验证清单：
@@ -133,7 +134,7 @@ class _FakeClient:
     def chat(self):
         return SimpleNamespace(completions=self)
 
-    def create(self, **kwargs):
+    async def create(self, **kwargs):
         self.last_kwargs = kwargs
         message = SimpleNamespace(content=self._content)
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
@@ -155,7 +156,7 @@ def test_router_parse():
     ]
     for raw, expected in cases:
         router = Router(_FakeClient(raw), "test-model")
-        actual = router.route("测试输入")
+        actual = asyncio.run(router.route("测试输入"))
         if actual == expected:
             _ok(f"「{raw}」→ {actual}")
         else:
@@ -163,7 +164,7 @@ def test_router_parse():
 
     client = _FakeClient("presale")
     router = Router(client, "test-model")
-    router.route("测试输入")
+    asyncio.run(router.route("测试输入"))
     mt = (client.last_kwargs or {}).get("max_tokens")
     if mt == 2048:
         _ok("max_tokens=2048 已生效（推理模型思考需预算；2026-09-16 由 512 上调）")
@@ -177,7 +178,7 @@ def test_end_to_end_smoke():
     _clean()
     orch = _fresh_orchestrator()
 
-    reply = orch.chat("有什么适合编程的笔记本推荐吗")
+    reply = asyncio.run(orch.chat("有什么适合编程的笔记本推荐吗"))
 
     if isinstance(reply, str) and reply.strip():
         _ok(f"chat() 返回非空 str（{len(reply)} 字符）")
@@ -210,7 +211,7 @@ def test_input_size_guard():
 
     # 中文字符估算约 1.5 token/字，构造远超上限的输入
     over = "很长" * orch.max_user_input_tokens
-    reply = orch.chat(over)
+    reply = asyncio.run(orch.chat(over))
 
     if orch.history_size == before and "输入过长" in reply:
         _ok(f"超长输入被拦下，历史未变（仍为 {before} 条）")

@@ -121,6 +121,11 @@ class AsyncRuntime:
         """当前可用 LLM 名额（诊断用）。"""
         return self._llm_slots._value
 
+    @property
+    def llm_gate(self) -> asyncio.Semaphore:
+        """LLM 并发闸门（orchestrator 的 GatedAsyncClient 使用）。"""
+        return self._llm_slots
+
     def acquire_llm_slot(self) -> "_LlmSlot":
         """获取一个 LLM 并发名额句柄（模型调用前 acquire，结束后释放）。
 
@@ -153,3 +158,39 @@ async def run_sync(fn, *args, **kwargs):
     """
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+
+
+class GatedAsyncClient:
+    """AsyncOpenAI 的并发闸门包装（阶段二的最小侵入关键）。
+
+    Router / SubAgent / compaction / extraction 只调
+    ``client.chat.completions.create``——把传入的 client 换成这个包装后，
+    调用点零改动，限流在 client 层统一生效（每次 create 过 Semaphore）。
+    其余属性（model / close / usage 统计等）透传给内部真实客户端。
+    """
+
+    def __init__(self, inner, semaphore: asyncio.Semaphore):
+        self._inner = inner
+        self._semaphore = semaphore
+        # 测试替身可能只有 close（无 chat 链）：缺失时走 __getattr__ 透传，
+        # 访问时才报错，保证构造永不因替身形状失败
+        if hasattr(inner, "chat"):
+            self.chat = _GatedChat(inner.chat, semaphore)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+class _GatedChat:
+    def __init__(self, inner_chat, semaphore: asyncio.Semaphore):
+        self.completions = _GatedCompletions(inner_chat.completions, semaphore)
+
+
+class _GatedCompletions:
+    def __init__(self, inner_completions, semaphore: asyncio.Semaphore):
+        self._inner = inner_completions
+        self._semaphore = semaphore
+
+    async def create(self, **kwargs):
+        async with self._semaphore:  # 名额耗尽时排队，不占线程
+            return await self._inner.create(**kwargs)

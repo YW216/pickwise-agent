@@ -8,12 +8,14 @@
 合并由主线程按 SCENARIO_ORDER 固定顺序单点完成。
 """
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Optional
 
+import asyncio
+
 #from openai import OpenAI
-from langfuse.openai import openai
+from langfuse.openai import AsyncOpenAI
 
 from app.agent.storage import delete_session, load_session, save_session
 from app.agent.compaction import compact, should_compact
@@ -33,6 +35,7 @@ from app.agent.tools.manager import ToolManager
 from app.multi_agent.context_pack import ContextPack, build_working_messages
 from app.prompts.agents import RESULT_PROMPT
 from app.identity import SessionIdentity, validate_user_id
+from app.services.async_runtime import GatedAsyncClient, run_sync
 
 
 class MultiAgentOrchestrator:
@@ -49,6 +52,7 @@ class MultiAgentOrchestrator:
         mcp_enabled: bool | None = None,
         database_url: str | None = None,
         client=None,
+        llm_gate=None,
     ):
         self.identity = identity
         if identity is not None:
@@ -65,13 +69,16 @@ class MultiAgentOrchestrator:
         loaded = load_session(self.session_path, identity=self.identity)
         if client is None:
             settings.assert_openai_configured()
-            client = openai.OpenAI(
+            client = AsyncOpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
                 timeout=settings.openai_timeout,
                 max_retries=settings.openai_max_retries,
             )
-        self.client = client
+        # 并发闸门（阶段二）：HTTP 路径传入共享 runtime 的闸门；CLI 无并发
+        # 需求时自建（同默认值），保证限流语义在两条入口一致。
+        self.client = GatedAsyncClient(client, llm_gate or asyncio.Semaphore(
+            settings.llm_max_concurrency))
         self.model = settings.model_name
         self.temperature = settings.temperature
         self.context_window = settings.context_window
@@ -144,16 +151,22 @@ class MultiAgentOrchestrator:
                 except Exception:
                     pass
             try:
-                self.client.close()
+                inner = getattr(self.client, "_inner", self.client)
+                close_result = inner.close()
+                if asyncio.iscoroutine(close_result):
+                    try:
+                        asyncio.get_running_loop().create_task(close_result)
+                    except RuntimeError:
+                        asyncio.run(close_result)  # 无 loop（CLI 构造失败）：临时 loop 关闭
             except Exception:
-                pass
+                pass  # 清理尽力而为
             raise
 
     @property
     def history_size(self) -> int:
         return len(self.raw_messages)
 
-    def chat(self, user_input: str) -> str:
+    async def chat(self, user_input: str) -> str:
         """主答复与附属工作分离：失败保留用户消息，成功答案不被记忆/落盘覆盖。
 
         入口拒绝不写历史；已入账的失败轮只补一次最终回复。
@@ -171,7 +184,7 @@ class MultiAgentOrchestrator:
                 )
             self.raw_messages.append({"role": "user", "content": user_input})
             turn_started = True
-            reply = self._chat_inner(user_input)
+            reply = await self._chat_inner(user_input)
             completed = True
         except Exception as exc:  # 最外层保护用户体验；错误不靠静默吞掉处理
             reply = self._on_failure(user_input, exc)
@@ -181,7 +194,7 @@ class MultiAgentOrchestrator:
         if turn_started:
             if completed:
                 try:
-                    self.memory_manager.update_short_term(self.raw_messages[-6:])
+                    await self.memory_manager.update_short_term(self.raw_messages[-6:])
                 except Exception as exc:
                     self._record_failure("memory", exc, affects_answer=False)
             self._save_safely()
@@ -232,12 +245,12 @@ class MultiAgentOrchestrator:
                 return key
         return None
 
-    def _chat_inner(self, user_input: str) -> str:
+    async def _chat_inner(self, user_input: str) -> str:
         """只完成路由、专家执行和最终回复提交；记忆/持久化在 chat 外层处理。"""
         pack = self._build_pack()
         # 压缩只针对专家 Agent 的上下文预算（_estimate_context_tokens 估的是
         # build_working_messages + 工具 schema），供后面的专家执行准备。
-        if self._try_compact(pack):
+        if await self._try_compact(pack):
             pack = self._build_pack()
         # 路由不再做"强制压缩重试"（2026-10-08 移除，理由见下）。
         #
@@ -253,7 +266,7 @@ class MultiAgentOrchestrator:
         #
         # SDK 已负责 HTTP 层重试，这里不再叠加传输重试，只做瞬时故障降级。
         try:
-            scenarios = self.router.route(user_input, pack.history, summary=pack.summary)
+            scenarios = await self.router.route(user_input, pack.history, summary=pack.summary)
         except Exception as exc:
             if is_transient(exc):
                 # 默认咨询可能不能完成推荐诉求：明确记为降级，而不是无损成功。
@@ -265,7 +278,7 @@ class MultiAgentOrchestrator:
         names = "、".join(AGENT_CONFIGS[k]["name"] for k in scenarios)
         print(f"\n🔀 [路由] → {names}（场景: {', '.join(scenarios)}，模式: {mode}）")
 
-        entries = self._execute_agents(scenarios, pack, mode)
+        entries = await self._execute_agents(scenarios, pack, mode)
         for entry in entries:
             if entry.status == "failed":
                 self.last_failures.append({
@@ -283,7 +296,7 @@ class MultiAgentOrchestrator:
             reply = entry.new_messages[-1]["content"]
             self.raw_messages.extend(entry.new_messages)
         else:
-            reply = self._run_result_agent(entries, user_input)
+            reply = await self._run_result_agent(entries, user_input)
             # full 档合并：各 Agent 工具消息对原样存档（[:-1]，成对约束天然满足），
             # Result 整合文本永远最后一条（设计文档 10.4）
             for entry in entries:
@@ -319,10 +332,10 @@ class MultiAgentOrchestrator:
             identity=getattr(self, "identity", None),
         )
 
-    def close(self):
+    async def close(self):
         """长期记忆提取失败不阻止资源清理，也不覆盖已经返回的答案。"""
         try:
-            self.memory_manager.consolidate_to_long_term(self.raw_messages, self.summary)
+            await self.memory_manager.consolidate_to_long_term(self.raw_messages, self.summary)
         except Exception as exc:
             self._record_failure("long_term_memory", exc, affects_answer=False)
         finally:
@@ -332,7 +345,10 @@ class MultiAgentOrchestrator:
                 except Exception as exc:
                     self._record_failure("tool_close", exc, affects_answer=False)
             try:
-                self.client.close()
+                inner = getattr(self.client, "_inner", self.client)
+                close_result = inner.close()
+                if asyncio.iscoroutine(close_result):
+                    await close_result  # 真异步客户端；同步替身（Mock）直接完成
             except Exception as exc:
                 self._record_failure("client_close", exc, affects_answer=False)
 
@@ -360,7 +376,7 @@ class MultiAgentOrchestrator:
             return self.skill_manager.build_catalog_prompt(agent_key)
         return ""
 
-    def _execute_agents(
+    async def _execute_agents(
         self, scenarios: list[str], pack: ContextPack, mode: str,
         retry: bool = True,
     ) -> list[BlackboardEntry]:
@@ -375,14 +391,14 @@ class MultiAgentOrchestrator:
             BlackboardEntry 列表，长度 = len(scenarios)，顺序与入参一致。
         """
 
-        def run(key: str) -> BlackboardEntry:
+        async def run(key: str) -> BlackboardEntry:
             agent = self.agents[key]
             # 技能目录按 Agent 归属过滤（pack 共享只读，per-agent 目录用轻量副本注入）
             agent_pack = replace(pack, skill_catalog=self._skill_catalog_for(key))
             try:
                 messages = build_working_messages(agent_pack, AGENT_CONFIGS[key], mode)
 
-                _, new_messages = agent.handle(messages, max_steps=self.max_react_steps)
+                _, new_messages = await agent.handle(messages, max_steps=self.max_react_steps)
                 if (
                     not new_messages
                     or new_messages[-1].get("role") != "assistant"
@@ -406,12 +422,10 @@ class MultiAgentOrchestrator:
                     error_type=type(e).__name__,
                 )
                 
-        #多线程并行执行场景 Agent，按顺序返回结果。   这跟线程池有关
-        with ThreadPoolExecutor(max_workers=len(scenarios)) as pool:
-            futures = {pool.submit(run, key): key for key in scenarios}
-            results: dict[str, BlackboardEntry] = {}
-            for fut in as_completed(futures):
-                results[futures[fut]] = fut.result()
+        # 多 Agent 并行（阶段二起为协程并发）：等待模型期间不占线程，
+        # 并发上限由 LLM 闸门统一控制（不再依赖线程数）
+        results_list = await asyncio.gather(*(run(key) for key in scenarios))
+        results: dict[str, BlackboardEntry] = dict(zip(scenarios, results_list))
 
         # 工作线程全部结束后才做压缩重试；成功结果保留，失败子集最多重试一次。
         overflow = [key for key in scenarios if results[key].status == "overflow"]
@@ -421,8 +435,8 @@ class MultiAgentOrchestrator:
         if overflow and retry:
             # 先压，压成了才重试——压不动就没必要重跑（上下文一样大，必然二次溢出）。
             # 注意 _try_compact 不是谓词：成功时它已经删过历史前缀、换过摘要了。
-            if self._try_compact(pack, force=True):
-                for entry in self._execute_agents(
+            if await self._try_compact(pack, force=True):
+                for entry in await self._execute_agents(
                     overflow, self._build_pack(), mode, retry=False,
                 ):
                     results[entry.agent] = entry
@@ -431,7 +445,7 @@ class MultiAgentOrchestrator:
                 entry.status = "failed"
         return [results[key] for key in scenarios]
 
-    def _run_result_agent(
+    async def _run_result_agent(
         self, entries: list[BlackboardEntry], user_input: str,
     ) -> str:
         """Result 读黑板整合；故障/空正文保留专家结论，不把内部异常传给用户。"""
@@ -447,7 +461,7 @@ class MultiAgentOrchestrator:
             ]
             if estimate_messages_tokens(messages) > self.context_window - self.reserve_tokens:
                 raise ContextOverflowError("汇总上下文超过预算")
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
@@ -494,7 +508,7 @@ class MultiAgentOrchestrator:
                 )
         return max(estimates, default=0)
 
-    def _try_compact(self, pack: ContextPack, force: bool = False) -> bool:
+    async def _try_compact(self, pack: ContextPack, force: bool = False) -> bool:
         """在请求前压缩已完成历史；当前 user turn 永远留在工作历史中。
 
         事务顺序：先压缩（纯计算）→ 确认能缩小上下文 → 最后才删除前缀并替换
@@ -518,7 +532,7 @@ class MultiAgentOrchestrator:
             active_user_index = len(self.raw_messages)
 
         try:
-            cut, new_summary = compact(
+            cut, new_summary = await compact(
                 messages=self.raw_messages,
                 summary=self.summary,
                 client=self.client,

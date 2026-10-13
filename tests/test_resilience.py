@@ -9,6 +9,7 @@
 这些是「服务不可用时的行为契约」——重构时最容易 inadvertent 删掉的就是它。
 """
 
+import asyncio
 import httpx
 from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
 
@@ -83,7 +84,7 @@ def test_transient_classification_boundary():
 def test_router_transient_degrades_in_place(tmp_path, monkeypatch):
     """真正验证默认场景被执行且返回专家答复，而不是泛泛检查有兜底文本。"""
     from types import SimpleNamespace
-    from unittest.mock import Mock
+    from unittest.mock import AsyncMock, Mock
 
     o = _build(tmp_path)
     o.router = SimpleNamespace(route=Mock(side_effect=APIConnectionError(
@@ -93,12 +94,12 @@ def test_router_transient_degrades_in_place(tmp_path, monkeypatch):
         stm_to_dict=lambda: {},
     )
     o.skill_manager = SimpleNamespace(enabled=False)
-    execution = Mock(return_value=[BlackboardEntry(
+    execution = AsyncMock(return_value=[BlackboardEntry(
         agent=DEFAULT_SCENARIO, status="success", error=None,
         new_messages=[{"role": "assistant", "content": "expert answer"}],
     )])
     monkeypatch.setattr(o, "_execute_agents", execution)
-    assert o.chat("推荐耳机") == "expert answer"
+    assert asyncio.run(o.chat("推荐耳机")) == "expert answer"
     assert o.router.route.call_count == 1
     assert execution.call_args.args[0] == [DEFAULT_SCENARIO]
     assert any(f["stage"] == "router" for f in o.last_failures)
@@ -120,7 +121,7 @@ def test_result_agent_failure_keeps_agent_output(tmp_path):
         BlackboardEntry(agent="consult", status="success", error=None,
                         new_messages=[{"role": "assistant", "content": "保修一年。"}]),
     ]
-    reply = o._run_result_agent(entries, "推荐耳机")
+    reply = asyncio.run(o._run_result_agent(entries, "推荐耳机"))
     assert "HP-01" in reply and "保修一年" in reply, f"成果被丢弃: {reply}"
     assert "无法回答" not in reply  # 两项都成功，不该出现失败提示
 
@@ -133,7 +134,7 @@ def test_result_agent_failure_marks_failed_entry(tmp_path):
                         new_messages=[{"role": "assistant", "content": "推荐 HP-01。"}]),
         BlackboardEntry(agent="consult", status="failed", error="boom", new_messages=[]),
     ]
-    reply = o._run_result_agent(entries, "推荐耳机")
+    reply = asyncio.run(o._run_result_agent(entries, "推荐耳机"))
     assert "HP-01" in reply
     assert "PickWise-咨询" in reply and "无法回答" in reply, \
         f"失败项未如实告知: {reply}"
@@ -189,7 +190,7 @@ def test_chat_failure_pairs_messages_and_persists(tmp_path):
 
     o.router = Router(o.client, "fake")
 
-    reply = o.chat("推荐耳机")
+    reply = asyncio.run(o.chat("推荐耳机"))
     assert isinstance(reply, str) and reply, "应返回兜底话术而非抛异常"
     roles = [m.get("role") for m in o.raw_messages]
     assert roles == ["user", "assistant"], f"配对不完整: {roles}"
@@ -204,7 +205,7 @@ def test_chat_failure_pairs_messages_and_persists(tmp_path):
 
 def test_transport_settings_are_explicit(tmp_path, monkeypatch):
     """检查实际构造参数；改成非默认值，避免“碰巧 SDK 默认一样”的假通过。"""
-    from unittest.mock import Mock
+    from unittest.mock import AsyncMock, Mock
 
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     monkeypatch.setattr(settings, "openai_base_url", "https://test.invalid")
@@ -214,7 +215,7 @@ def test_transport_settings_are_explicit(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "skills_enabled", False)
     monkeypatch.setattr(settings, "mcp_enabled", False)
     factory = Mock(return_value=_client())
-    monkeypatch.setattr("app.multi_agent.orchestrator.openai.OpenAI", factory)
+    monkeypatch.setattr("app.multi_agent.orchestrator.AsyncOpenAI", factory)
     o = MultiAgentOrchestrator(session_path=str(tmp_path / "session.json"))
     factory.assert_called_once_with(
         api_key="test-key", base_url="https://test.invalid", timeout=12.5, max_retries=1,

@@ -17,9 +17,9 @@ class ShortTermMemory:
     def __init__(self):
         self.facts: list[str] = []
 
-    def update(self, client: OpenAI, model: str, recent_messages: list[dict]) -> None:
+    async def update(self, client, model: str, recent_messages: list[dict]) -> None:
         """从最近的对话消息中提取/更新事实。"""
-        self.facts = extract_short_term_facts(
+        self.facts = await extract_short_term_facts(
             client, model, recent_messages, self.facts,
         )
 

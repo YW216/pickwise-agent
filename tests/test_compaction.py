@@ -12,6 +12,8 @@
 import json
 from types import SimpleNamespace
 
+import asyncio
+
 import pytest
 
 from app.agent.compaction import (
@@ -57,7 +59,7 @@ class FakeClient:
     def chat(self):
         return SimpleNamespace(completions=self)
 
-    def create(self, **kwargs):
+    async def create(self, **kwargs):
         self.calls.append(kwargs)
         index = min(len(self.calls) - 1, len(self.contents) - 1)
         return SimpleNamespace(
@@ -127,14 +129,14 @@ def test_compact_sends_only_delta():
     client = FakeClient(STRUCTURED_SUMMARY)
     snapshot = [dict(m) for m in messages]
 
-    cut, summary = compact(
+    cut, summary = asyncio.run(compact(
         messages=messages,
         summary=None,
         client=client,
         model="test-model",
         keep_recent_tokens=1,
         end=6,
-    )
+    ))
 
     assert cut == 4  # messages[:4] 即待删前缀
     assert "比较 LP-01" in client.calls[0]["messages"][1]["content"]
@@ -154,14 +156,14 @@ def test_compact_rejects_unstructured_summary():
     client = FakeClient("自由文本")
 
     with pytest.raises(ValueError, match="固定 section"):
-        compact(
+        asyncio.run(compact(
             messages=messages,
             summary=None,
             client=client,
             model="test-model",
             keep_recent_tokens=1,
             end=3,
-        )
+        ))
     # 两次都失败才放弃：调用恰好 2 次
     assert len(client.calls) == 2
 
@@ -179,14 +181,14 @@ def test_compact_retries_once_and_tolerates_trailing_whitespace():
     )
     client = FakeClient("自由文本", spaced)
 
-    cut, summary = compact(
+    cut, summary = asyncio.run(compact(
         messages=messages,
         summary=None,
         client=client,
         model="test-model",
         keep_recent_tokens=1,
         end=3,
-    )
+    ))
 
     assert len(client.calls) == 2
     assert cut == 2
@@ -209,14 +211,14 @@ def test_compact_accepts_summary_at_realistic_length():
         {"role": "assistant", "content": "答复"},
         {"role": "user", "content": "当前问题"},
     ]
-    cut, summary = compact(
+    cut, summary = asyncio.run(compact(
         messages=messages,
         summary=None,
         client=FakeClient(at_limit),
         model="test-model",
         keep_recent_tokens=1,
         end=3,
-    )
+    ))
 
     assert cut == 2
     assert summary == at_limit.strip()
@@ -235,14 +237,14 @@ def test_compact_condenses_overlong_summary():
     # 第 1 次调用返回越限摘要（触发 condense），第 2 次返回精简版
     client = FakeClient(overlong, STRUCTURED_SUMMARY)
 
-    cut, summary = compact(
+    cut, summary = asyncio.run(compact(
         messages=messages,
         summary=None,
         client=client,
         model="test-model",
         keep_recent_tokens=1,
         end=3,
-    )
+    ))
 
     assert cut == 2
     assert summary == STRUCTURED_SUMMARY.strip()   # 保存的是精简版，不是越限版
@@ -261,14 +263,14 @@ def test_compact_fails_when_condense_still_overlong():
     client = FakeClient(overlong, overlong)        # 两次都越限
 
     with pytest.raises(ValueError, match="长度上限"):
-        compact(
+        asyncio.run(compact(
             messages=messages,
             summary=None,
             client=client,
             model="test-model",
             keep_recent_tokens=1,
             end=3,
-        )
+        ))
 
     assert len(client.calls) == 2
 

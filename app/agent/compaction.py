@@ -102,7 +102,7 @@ def _over_limit(summary: str, max_tokens: int, max_chars: int) -> bool:
     return len(summary) > max_chars or estimate_text_tokens(summary) > max_tokens
 
 
-def compact(
+async def compact(
     messages: list[dict],
     summary: str | None,
     client: OpenAI,
@@ -128,8 +128,8 @@ def compact(
 
     delta = messages[:cut]
 
-    def generate() -> str:
-        raw = summarize(
+    async def generate() -> str:
+        raw = await summarize(
             client=client,
             model=model,
             old_messages=delta,
@@ -141,11 +141,11 @@ def compact(
         return _validate_summary(raw.strip())
 
     try:
-        new_summary = generate()
+        new_summary = await generate()
     except ValueError:
         # 摘要格式偶发抖动（标题变体、空 section 等）重试一次再放弃；
         # 确定性失败（如输入超预算）在第二次调用中同样快速抛出，不放大成本。
-        new_summary = generate()
+        new_summary = await generate()
 
     if _over_limit(new_summary, summary_max_tokens, summary_max_chars):
         # 摘要撞墙的补救：增量摘要只增不减，一旦越限就再也压不动（此后每轮压缩都
@@ -154,14 +154,14 @@ def compact(
         # 目标取上限的 2/3，给下次增长留空间，避免刚压完立刻又越限。
         try:
             new_summary = _validate_summary(
-                condense(
+                (await condense(
                     client=client,
                     model=model,
                     summary=new_summary,
                     target_chars=summary_max_chars * 2 // 3,
                     context_window=context_window,
                     max_tokens=summary_max_tokens,
-                ).strip()
+                )).strip()
             )
         except Exception as exc:
             print(f"⚠️  [压缩] 摘要精简失败，放弃本次压缩: {exc}")

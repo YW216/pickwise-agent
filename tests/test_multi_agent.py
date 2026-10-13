@@ -33,7 +33,26 @@ from app.agent.context_budget import ContextOverflowError  # noqa: E402
 from app.multi_agent.agents import AGENT_CONFIGS  # noqa: E402
 from app.multi_agent.blackboard import BlackboardEntry, render_blackboard  # noqa: E402
 from app.multi_agent.context_pack import build_working_messages  # noqa: E402
-from app.multi_agent.orchestrator import MultiAgentOrchestrator  # noqa: E402
+import asyncio
+
+from app.multi_agent.orchestrator import MultiAgentOrchestrator
+
+
+def _run(coro):
+    """同步测试体里执行协程（chat async 化的最小适配）。"""
+    return asyncio.run(coro)
+
+
+def _fake_route(scenarios):
+    async def _route(inp, hist=None, summary=None):
+        return scenarios
+    return _route
+
+
+def _fake_result(text):
+    async def _result(entries, user_input):
+        return text
+    return _result  # noqa: E402
 from app.multi_agent.router import Router  # noqa: E402
 from app.prompts.agents import (  # noqa: E402
     CONSULT_MULTI_PROMPT,
@@ -176,7 +195,7 @@ def a2_router_parse():
         def chat(self):
             return SimpleNamespace(completions=self)
 
-        def create(self, **kwargs):
+        async def create(self, **kwargs):
             self.last_kwargs = kwargs
             return SimpleNamespace(
                 choices=[SimpleNamespace(message=SimpleNamespace(content=self._content))]
@@ -193,13 +212,13 @@ def a2_router_parse():
         ("乱码 xyz", ["consult"]),
     ]
     for raw, expected in cases:
-        actual = Router(_FakeClient(raw), "test-model").route("测试输入")
+        actual = _run(Router(_FakeClient(raw), "test-model").route("测试输入"))
         if actual != expected:
             _fail(f"「{raw}」期望 {expected}，实际 {actual}")
     _ok(f"{len(cases)} 条解析用例全过（大小写/中文逗号/固定顺序/去重/兜底）")
 
     client = _FakeClient("presale")
-    Router(client, "test-model").route("x")
+    _run(Router(client, "test-model").route("x"))
     if (client.last_kwargs or {}).get("max_tokens") == 2048:
         _ok("max_tokens=2048（推理模型思考预算；2026-09-16 由 512 上调）")
     else:
@@ -217,12 +236,17 @@ def a3_single_agent_path():
         {"role": "tool", "tool_call_id": "t1", "content": '{"candidates": []}'},
         {"role": "assistant", "content": "售前最终答复"},
     ]
-    orch.router.route = lambda inp, hist, summary=None: ["presale"]
-    orch.agents["presale"].handle = lambda msgs, max_steps=5: (presale_msgs[-1]["content"], presale_msgs)
+    orch.router.route = _fake_route(["presale"])
+    async def _handle_a3(msgs, max_steps=5):
+        return presale_msgs[-1]["content"], presale_msgs
+    orch.agents["presale"].handle = _handle_a3
     result_called = []
-    orch._run_result_agent = lambda e, u: result_called.append(1) or "不该调用"
+    async def _result_a3(e, u):
+        result_called.append(1)
+        return "不该调用"
+    orch._run_result_agent = _result_a3
 
-    reply = orch.chat("推荐个笔记本")
+    reply = _run(orch.chat("推荐个笔记本"))
 
     if reply == "售前最终答复" and not result_called:
         _ok("reply = Agent 最终文本直返，Result 未被调用")
@@ -259,18 +283,18 @@ def a4_multi_agent_merge():
     ]
 
     def _fake(msgs, delay):
-        def _handle(m, max_steps=5):
-            time.sleep(delay)
-            return msgs[-1]["content"], msgs
+        async def _handle(m, max_steps=5):
+            await asyncio.sleep(delay)
+            return m[-1]["content"], m
         return _handle
 
-    orch.router.route = lambda inp, hist, summary=None: ["presale", "consult"]
+    orch.router.route = _fake_route(["presale", "consult"])
     # presale 慢、consult 快：完成顺序 consult 先，合并仍须 presale 在前（#7）
     orch.agents["presale"].handle = _fake(presale_msgs, 0.3)
     orch.agents["consult"].handle = _fake(consult_msgs, 0.05)
-    orch._run_result_agent = lambda e, u: "Result 整合文本"
+    orch._run_result_agent = _fake_result("Result 整合文本")
 
-    reply = orch.chat("推荐个笔记本，顺便讲讲 OLED")
+    reply = _run(orch.chat("推荐个笔记本，顺便讲讲 OLED"))
 
     if reply != "Result 整合文本":
         _fail(f"reply 应为 Result 整合文本，实际 {reply!r}")
@@ -292,18 +316,18 @@ def a4_multi_agent_merge():
 
     # #8 并行只读：执行期间 raw_messages 长度不变
     orch2 = _mock_orch()
-    orch2.router.route = lambda inp, hist, summary=None: ["presale", "consult"]
+    orch2.router.route = _fake_route(["presale", "consult"])
     lens = []
     for key, msgs, delay in (("presale", presale_msgs, 0.2), ("consult", consult_msgs, 0.05)):
         def _make(k, m, d):
-            def _h(mm, max_steps=5):
-                time.sleep(d)
+            async def _h(mm, max_steps=5):
+                await asyncio.sleep(d)
                 lens.append(len(orch2.raw_messages))
                 return m[-1]["content"], m
             return _h
         orch2.agents[key].handle = _make(key, msgs, delay)
     orch2._run_result_agent = lambda e, u: "R"
-    orch2.chat("再测一轮")
+    _run(orch2.chat("再测一轮"))
     if all(n == 1 for n in lens):
         _ok("执行期间 raw_messages 长度不变（并行只读，#8）")
     else:
@@ -321,20 +345,22 @@ def a5_partial_failure():
         {"role": "tool", "tool_call_id": "c1", "content": '{"results": []}'},
         {"role": "assistant", "content": "咨询报告"},
     ]
-    orch.router.route = lambda inp, hist, summary=None: ["presale", "consult"]
+    orch.router.route = _fake_route(["presale", "consult"])
 
-    def _boom(m, max_steps=5):
+    async def _boom(m, max_steps=5):
         raise RuntimeError("模拟崩溃")
     orch.agents["presale"].handle = _boom
-    orch.agents["consult"].handle = lambda m, max_steps=5: (ok_msgs[-1]["content"], ok_msgs)
+    async def _handle_a5(m, max_steps=5):
+        return ok_msgs[-1]["content"], ok_msgs
+    orch.agents["consult"].handle = _handle_a5
 
     received = {}
-    def _result(entries, user_input):
+    async def _result(entries, user_input):
         received["entries"] = entries
         return "Result: 咨询部分如下……售前部分暂时无法回答"
     orch._run_result_agent = _result
 
-    reply = orch.chat("推荐个笔记本，顺便讲讲 OLED")
+    reply = _run(orch.chat("推荐个笔记本，顺便讲讲 OLED"))
 
     statuses = {e.agent: e.status for e in received["entries"]}
     if reply and statuses == {"presale": "failed", "consult": "success"}:
@@ -354,11 +380,13 @@ def a5_partial_failure():
 def a6_return_format():
     print("\n[A6] 返回格式：chat() 返回 str（#13，mock）")
     orch = _mock_orch()
-    orch.router.route = lambda inp, hist, summary=None: ["presale"]
-    orch.agents["presale"].handle = lambda m, max_steps=5: ("最终答复", [
-        {"role": "assistant", "content": "最终答复"},
-    ])
-    reply = orch.chat("你好")
+    orch.router.route = _fake_route(["presale"])
+    async def _handle_a6(m, max_steps=5):
+        return "最终答复", [
+            {"role": "assistant", "content": "最终答复"},
+        ]
+    orch.agents["presale"].handle = _handle_a6
+    reply = _run(orch.chat("你好"))
     if isinstance(reply, str):
         _ok(f"chat() 返回 str（{len(reply)} 字符），无 schema 无提取调用")
     else:
@@ -371,14 +399,14 @@ def a6b_overflow_retry():
     print("\n[A6b] 循环中途溢出 → 压缩 → 整体重试（mock）")
     orch = _mock_orch()
     orch.compaction_enabled = True   # 本用例需要压缩生效（其余 mock 用例关闭）
-    orch.router.route = lambda inp, hist, summary=None: ["presale"]
+    orch.router.route = _fake_route(["presale"])
 
     big_tool = {"role": "tool", "tool_call_id": "tX",
                 "content": '{"data": "' + "x" * 4000 + '"}'}
 
     def fake_success(user_text):
         """正常轮：一次大工具调用 + 最终答复（撑起可压缩的历史）。"""
-        def handle(messages, max_steps=5):
+        async def handle(messages, max_steps=5):
             tc = {"id": "tX", "type": "function",
                   "function": {"name": "search_catalog", "arguments": "{}"}}
             traj = [
@@ -391,18 +419,18 @@ def a6b_overflow_retry():
 
     # 前两轮正常：撑起两轮可压缩历史（单轮历史没有 user 切点，见 find_cut_point）
     orch.agents["presale"].handle = fake_success("第一轮")
-    orch.chat("第一轮")
+    _run(orch.chat("第一轮"))
     orch.agents["presale"].handle = fake_success("第二轮")
-    orch.chat("第二轮")
+    _run(orch.chat("第二轮"))
 
     # 第三轮：第一次 handle 中途溢出（模拟第 2 步超限），重入后正常
     calls = {"n": 0}
 
-    def flaky(messages, max_steps=5):
+    async def flaky(messages, max_steps=5):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ContextOverflowError("模拟循环中途溢出")
-        return fake_success("第三轮")(messages, max_steps=max_steps)
+        return await fake_success("第三轮")(messages, max_steps=max_steps)
 
     orch.agents["presale"].handle = flaky
 
@@ -410,14 +438,14 @@ def a6b_overflow_retry():
     real_compact = om.compact
     compact_calls = {"n": 0}
 
-    def fake_compact(messages, summary, **kwargs):
+    async def fake_compact(messages, summary, **kwargs):
         compact_calls["n"] += 1
         cut = 4  # 删掉第一轮（u1 起始的 4 条），保留第二轮 + 当前问题
         return cut, MOCK_SUMMARY
 
     om.compact = fake_compact
 
-    reply = orch.chat("第三轮")
+    reply = _run(orch.chat("第三轮"))
     om.compact = real_compact
 
     if compact_calls["n"] >= 1:
@@ -445,10 +473,12 @@ def a6b_overflow_retry():
 def a7_session_persistence():
     print("\n[A7] 会话持久化与恢复（#12，mock）")
     orch = _mock_orch()
-    orch.router.route = lambda inp, hist, summary=None: ["presale"]
+    orch.router.route = _fake_route(["presale"])
     msgs = [{"role": "assistant", "content": "答复一"}]
-    orch.agents["presale"].handle = lambda m, max_steps=5: (msgs[0]["content"], msgs)
-    orch.chat("第一轮")
+    async def _handle_a7(m, max_steps=5):
+        return msgs[0]["content"], msgs
+    orch.agents["presale"].handle = _handle_a7
+    _run(orch.chat("第一轮"))
     orch.save()
 
     # 新实例恢复
@@ -479,7 +509,7 @@ def s1_memory():
     if not orch.memory_manager.memory_enabled:
         _warn("memory_enabled=False，跳过 S1")
         return
-    orch.chat("你好，我叫测试员，只买星海品牌的电子产品")
+    _run(orch.chat("你好，我叫测试员，只买星海品牌的电子产品"))
     stm_facts = orch.memory_manager.stm.facts
     if stm_facts:
         _ok(f"STM 更新（{len(stm_facts)} 条 facts）")
@@ -506,11 +536,11 @@ def s2_compression():
     orch.reserve_tokens = 195700
     orch.keep_recent_tokens = 300
 
-    orch.chat("推荐个 5000 内的耳机")
-    orch.chat("要降噪好的，通勤用")
+    _run(orch.chat("推荐个 5000 内的耳机"))
+    _run(orch.chat("要降噪好的，通勤用"))
     # 第 3 轮请求前才存在"可对齐的 user 切点"（第 1 个已完成 turn 的下标 > 0），
     # 压缩在轮间触发——2 轮时唯一完成 turn 位于下标 0，按 D12 宁可不压
-    orch.chat("差不多就这款了，帮我看看它的口碑")
+    _run(orch.chat("差不多就这款了，帮我看看它的口碑"))
     if orch.summary:
         _ok(f"压缩已触发（删除前缀后保留 {len(orch.raw_messages)} 条），summary {len(orch.summary or '')} 字")
     else:
@@ -533,7 +563,7 @@ def s2_compression():
     else:
         _fail("商品记忆为空（product_tracker 未随压缩事务更新）")
     # 压缩后追问（Router 靠 summary 兜底）
-    reply = orch.chat("第一款多少钱")
+    reply = _run(orch.chat("第一款多少钱"))
     if isinstance(reply, str) and reply.strip():
         _ok(f"压缩后追问正常（跨压缩指代，{len(reply)} 字符）")
     else:
@@ -590,7 +620,7 @@ def s5_end_to_end_smoke():
     print("\n[S5] 端到端多意图 smoke（真调 LLM：#5/#11）")
     _clean()
     orch = MultiAgentOrchestrator(session_path=TEST_SESSION)
-    reply = orch.chat("推荐个 6000 内的笔记本，顺便讲讲 OLED 和 IPS 屏的区别")
+    reply = _run(orch.chat("推荐个 6000 内的笔记本，顺便讲讲 OLED 和 IPS 屏的区别"))
     if not (isinstance(reply, str) and reply.strip()):
         _fail("端到端返回异常")
     _ok(f"端到端成功（reply {len(reply)} 字符）")

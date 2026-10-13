@@ -39,11 +39,11 @@ class MemoryManager:
         if self.memory_enabled:
             self.ltm.load()
 
-    def update_short_term(self, recent_messages: list[dict]) -> None:
+    async def update_short_term(self, recent_messages: list[dict]) -> None:
         """每轮对话后更新短期记忆。"""
         if not self.memory_enabled:
             return
-        self.stm.update(self.client, self.model, recent_messages)
+        await self.stm.update(self.client, self.model, recent_messages)
 
     def build_memory_prompt_sections(self) -> list[dict]:
         """生成所有记忆相关的 system prompt 消息列表。"""
@@ -59,13 +59,13 @@ class MemoryManager:
             sections.append({"role": "system", "content": stm_section})
         return sections
 
-    def consolidate_to_long_term(
+    async def consolidate_to_long_term(
         self, messages: list[dict], summary: Optional[str],
     ) -> None:
         """会话结束时，将本次对话的关键事实巩固到长期记忆。"""
         if not self.memory_enabled:
             return
-        self.ltm.extract_and_save(
+        await self.ltm.extract_and_save(
             self.client, self.model, messages, summary,
         )
 

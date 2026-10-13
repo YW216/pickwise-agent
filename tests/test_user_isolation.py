@@ -6,6 +6,8 @@ from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import Mock
+import asyncio
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -28,11 +30,12 @@ def create_orchestrator(tmp_path):
 
     def create(owner=None, **options):
         owner = owner or SessionIdentity(str(uuid4()), str(uuid4()))
-        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=Mock())), close=Mock())
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock())), close=Mock())
         instance = MultiAgentOrchestrator(
             identity=owner, web_session_dir=str(tmp_path / "web"), client=client,
             skills_enabled=False, mcp_enabled=False, **options,
         )
+        instance._mock_client = client  # GatedAsyncClient 包装后从这里设置副作用
         instance.compaction_enabled = False
         created.append(instance)
         return instance
@@ -69,7 +72,7 @@ def test_real_child_agents_keep_users_isolated_when_chatting_in_parallel(create_
 
     def prepare(instance, marker):
         instance.memory_manager.stm.facts = [marker]
-        instance.router.route = Mock(return_value=["presale"])
+        instance.router.route = AsyncMock(return_value=["presale"])
 
         def complete(**kwargs):
             messages = kwargs["messages"]
@@ -83,12 +86,13 @@ def test_real_child_agents_keep_users_isolated_when_chatting_in_parallel(create_
                 message = SimpleNamespace(content=None, tool_calls=[call])
             return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")])
 
-        instance.client.chat.completions.create.side_effect = complete
+        instance._mock_client.chat.completions.create.side_effect = complete
 
     prepare(a, "A 预算 5000")
     prepare(b, "B 预算 8000")
     with ThreadPoolExecutor(max_workers=2) as pool:
-        replies = list(pool.map(lambda instance: instance.chat("记得我的预算吗？"), [a, b]))
+        replies = list(pool.map(
+            lambda instance: asyncio.run(instance.chat("记得我的预算吗？")), [a, b]))
     assert replies == ["A 预算 5000", "B 预算 8000"]
     for instance, marker in ((a, replies[0]), (b, replies[1])):
         state = load_session(instance.session_path, identity=instance.identity)
@@ -123,7 +127,7 @@ def test_parallel_consolidation_merges_both_windows_and_refreshes_existing_windo
     stranger = create_orchestrator()
     barrier = Barrier(2)
 
-    def extract(client, model, messages, summary, existing):
+    async def extract(client, model, messages, summary, existing):
         barrier.wait(timeout=5)
         return [fact(messages[0]["content"])], summary
 
@@ -132,7 +136,7 @@ def test_parallel_consolidation_merges_both_windows_and_refreshes_existing_windo
     second.raw_messages = [{"role": "user", "content": "希望续航长"}]
     a.summary, second.summary = "窗口一摘要", "窗口二摘要"
     with ThreadPoolExecutor(max_workers=2) as pool:
-        list(pool.map(lambda instance: instance.close(), [a, second]))
+        list(pool.map(lambda instance: asyncio.run(instance.close()), [a, second]))
     facts = recall(a)["data"]["long_term_facts"]
     assert {item["content"] for item in facts} == {"偏好轻薄本", "希望续航长"}
     assert set(recall(second)["data"]["recent_interactions"]) == {"窗口一摘要", "窗口二摘要"}
@@ -269,7 +273,7 @@ def test_legacy_cli_paths_and_settings_are_preserved(tmp_path):
     assert load_session(instance.session_path)["messages"] == instance.raw_messages
     assert instance.memory_manager.ltm.memory_path == tmp_path / "cli_memory" / "default.json"
     assert (settings.memory_dir, settings.memory_enabled, settings.mcp_enabled) == old_settings
-    instance.close()
+    asyncio.run(instance.close())
 
 
 def test_sandbox_passes_instance_options_without_mutating_settings(tmp_path, monkeypatch):

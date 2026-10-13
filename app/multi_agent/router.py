@@ -27,7 +27,7 @@ class Router:
         self.client = client
         self.model = model
 
-    def route(
+    async def route(
         self, user_input: str,
         history: Optional[list[dict]] = None,
         summary: Optional[str] = None,
@@ -61,7 +61,7 @@ class Router:
         blocks.append(ROUTER_OUTPUT_INSTRUCTION)
         prompt = "\n\n".join(blocks)
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,

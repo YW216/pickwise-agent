@@ -6,7 +6,7 @@ from app.agent.context_budget import estimate_messages_tokens, tool_result_view
 from app.prompts.summarizer import CONDENSE_PROMPT, SUMMARY_PROMPT
 
 
-def summarize(
+async def summarize(
     client: OpenAI,
     model: str,
     old_messages: list[dict],
@@ -63,7 +63,7 @@ def summarize(
     ]
     if estimate_messages_tokens(messages) + (max_tokens or 2048) > context_window:
         raise ValueError("摘要输入超过上下文预算，保留原始历史")
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=model,
         temperature=0.3,
         messages=messages,
@@ -80,7 +80,7 @@ def summarize(
     return (choice.message.content or "").strip()
 
 
-def condense(
+async def condense(
     client: OpenAI,
     model: str,
     summary: str,
@@ -103,7 +103,7 @@ def condense(
     ]
     if estimate_messages_tokens(messages) + max_tokens > context_window:
         raise ValueError("精简输入超过上下文预算")
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=model,
         temperature=0.3,
         messages=messages,

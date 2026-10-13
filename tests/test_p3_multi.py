@@ -11,6 +11,7 @@
 用法：python tests/test_p3_multi.py
 """
 
+import asyncio
 import sys
 import time
 from pathlib import Path
@@ -58,9 +59,9 @@ def _mock_orchestrator() -> MultiAgentOrchestrator:
 def _fake_handle(new_messages: list[dict], delay: float = 0.0):
     """造一个替身 handle：睡 delay（制造完成顺序与合并顺序相反）后返回固定产出。"""
 
-    def _handle(messages, max_steps=5):
+    async def _handle(messages, max_steps=5):
         if delay:
-            time.sleep(delay)
+            await asyncio.sleep(delay)
         return new_messages[-1]["content"], new_messages
     return _handle
 
@@ -130,18 +131,23 @@ def test_multi_merge():
     orch = _mock_orchestrator()
     captured = {"len_during": []}
 
-    orch.router.route = lambda inp, hist, summary=None: ["presale", "consult"]
+    async def _route(inp, hist=None, summary=None):
+        return ["presale", "consult"]
+    orch.router.route = _route
     # presale 慢、consult 快 → 完成顺序 consult 先，但合并必须 presale 在前（#7）
     orch.agents["presale"].handle = _fake_handle(GUIDE_MSGS, delay=0.3)
     orch.agents["consult"].handle = _fake_handle(CONSULT_MSGS, delay=0.05)
     for agent in orch.agents.values():  # 记录执行期间 raw_messages 长度（#8）
         orig = agent.handle
-        agent.handle = lambda msgs, max_steps=5, o=orig: (
-            captured["len_during"].append(len(orch.raw_messages)), o(msgs, max_steps),
-        )[1]
-    orch._run_result_agent = lambda entries, user_input: "Result 整合文本"
+        async def _spy_handle(msgs, max_steps=5, o=orig):
+            captured["len_during"].append(len(orch.raw_messages))
+            return await o(msgs, max_steps)
+        agent.handle = _spy_handle
+    async def _result(entries, user_input):
+        return "Result 整合文本"
+    orch._run_result_agent = _result
 
-    reply = orch.chat("推荐个笔记本，顺便讲讲 OLED 和 IPS 的区别")
+    reply = asyncio.run(orch.chat("推荐个笔记本，顺便讲讲 OLED 和 IPS 的区别"))
 
     if reply == "Result 整合文本":
         _ok("reply = Result 整合文本（非任一 Agent 原文）")
@@ -174,20 +180,22 @@ def test_multi_merge():
 def test_partial_failure():
     print("\n[3/5] 部分失败：presale 抛错 → consult 正常，不整体失败（mock）")
     orch = _mock_orchestrator()
-    orch.router.route = lambda inp, hist, summary=None: ["presale", "consult"]
+    async def _route(inp, hist=None, summary=None):
+        return ["presale", "consult"]
+    orch.router.route = _route
 
-    def _boom(messages, max_steps=5):
+    async def _boom(messages, max_steps=5):
         raise RuntimeError("模拟 presale 崩溃")
     orch.agents["presale"].handle = _boom
     orch.agents["consult"].handle = _fake_handle(CONSULT_MSGS)
 
     received = {}
-    def _result(entries, user_input):
+    async def _result(entries, user_input):
         received["entries"] = entries
         return "Result 收到的回复"
     orch._run_result_agent = _result
 
-    reply = orch.chat("推荐个笔记本，顺便讲讲 OLED")
+    reply = asyncio.run(orch.chat("推荐个笔记本，顺便讲讲 OLED"))
 
     if reply == "Result 收到的回复":
         _ok("整体未失败，reply 正常返回")
@@ -218,12 +226,17 @@ def test_partial_failure():
 def test_single_path():
     print("\n[4/5] 单 Agent：直返、无黑板无 Result、全量合并（mock）")
     orch = _mock_orchestrator()
-    orch.router.route = lambda inp, hist, summary=None: ["presale"]
+    async def _route(inp, hist=None, summary=None):
+        return ["presale"]
+    orch.router.route = _route
     orch.agents["presale"].handle = _fake_handle(GUIDE_MSGS)
     result_called = []
-    orch._run_result_agent = lambda e, u: result_called.append(1) or "不该走到"
+    async def _result(e, u):
+        result_called.append(1)
+        return "不该走到"
+    orch._run_result_agent = _result
 
-    reply = orch.chat("推荐个笔记本")
+    reply = asyncio.run(orch.chat("推荐个笔记本"))
 
     if reply == "售前最终报告：推荐 LP-01 ¥5180":
         _ok("reply = Agent 最终文本直返（不经过 Result）")
@@ -250,13 +263,13 @@ def test_end_to_end_multi_smoke():
 
     captured = []
     original_route = orch.router.route
-    def _spy(inp, hist, summary=None):
-        scenarios = original_route(inp, hist, summary=summary)
+    async def _spy(inp, hist, summary=None):
+        scenarios = await original_route(inp, hist, summary=summary)
         captured.append(scenarios)
         return scenarios
     orch.router.route = _spy
 
-    reply = orch.chat("推荐个 6000 以内的笔记本，顺便讲讲 OLED 和 IPS 屏的区别")
+    reply = asyncio.run(orch.chat("推荐个 6000 以内的笔记本，顺便讲讲 OLED 和 IPS 屏的区别"))
 
     scenarios = captured[0] if captured else []
     if len(scenarios) > 1:

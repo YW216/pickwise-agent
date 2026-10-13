@@ -149,7 +149,7 @@ class LongTermMemory:
             if item not in self.interaction_summaries:
                 self.interaction_summaries.append(item)
 
-    def extract_and_save(
+    async def extract_and_save(
         self,
         client: OpenAI,
         model: str,
@@ -161,7 +161,7 @@ class LongTermMemory:
             return
 
         self.load()
-        new_facts, interaction_summary = extract_long_term_facts(
+        new_facts, interaction_summary = await extract_long_term_facts(
             client, model, messages, summary, list(self.facts),
         )
 

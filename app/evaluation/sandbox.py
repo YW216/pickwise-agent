@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import time
 from pathlib import Path
@@ -80,7 +81,9 @@ class Sandbox:
                 self._instrument(agent, trace, patches)
 
                 for turn_index, turn in enumerate(case.turns):
-                    reply = agent.chat(turn)
+                    # chat 已异步化（阶段二）：沙箱保持同步循环，每轮用
+                    # 独立事件循环执行（评估是串行批处理，无需常驻 loop）
+                    reply = asyncio.run(agent.chat(turn))
                     trace.replies.append(reply)
                     trace.runtime_failures.extend(
                         {**failure, "turn_index": turn_index}

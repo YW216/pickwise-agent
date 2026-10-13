@@ -13,6 +13,7 @@ from app.agent.context_budget import (
     tool_result_view,
 )
 from app.agent.tools.manager import ToolManager
+from app.services.async_runtime import run_sync
 from app.prompts.agents import (
     CONSULT_MULTI_PROMPT,
     CONSULT_PROMPT,
@@ -71,7 +72,7 @@ class SubAgent:
         self.last_prompt_tokens: int | None = None
         self.last_estimated_tokens = 0
 
-    def handle(
+    async def handle(
         self, messages: list[dict], max_steps: int = 5,
     ) -> tuple[str, list[dict]]:
         """执行 ReAct 循环，返回 (最终文本, 新增消息列表)。
@@ -93,7 +94,7 @@ class SubAgent:
         for i in range(max_steps):
             print(f"第 {i+1} 步·[{self.name}]")
             try:
-                response = self._complete(working, self.tool_manager.tool_definitions)
+                response = await self._complete(working, self.tool_manager.tool_definitions)
             except Exception as exc:
                 if not isinstance(exc, ContextOverflowError) and not is_context_overflow(exc):
                     raise
@@ -137,7 +138,10 @@ class SubAgent:
                 # 解析 → 校验 → 熔断 → 执行 → 序列化，全部收口在 ToolManager
                 # （三道闸门见其方法说明）。参数用模型给的原始文本打印：
                 # 连"参数是坏 JSON"这种情形也能如实显示。
-                result_str = self.tool_manager.execute_call_as_message(
+                # 工具仍是同步实现（阶段三切换）：统一 to_thread 出口，
+                # 避免在事件循环内阻塞（PG/Milvus 网络调用）
+                result_str = await run_sync(
+                    self.tool_manager.execute_call_as_message,
                     tc.function.name, tc.function.arguments, seen,
                 )
                 
@@ -158,7 +162,7 @@ class SubAgent:
 
         # 兜底策略：超过最大步数时不给工具，让模型基于已有观察给出最终回答
         try:
-            response = self._complete(working, [])
+            response = await self._complete(working, [])
         except Exception as exc:
             if not isinstance(exc, ContextOverflowError) and not is_context_overflow(exc):
                 raise
@@ -181,14 +185,14 @@ class SubAgent:
             raise ValueError("模型未返回完整有效的最终答复")
         return content
 
-    def _complete(self, messages: list[dict], tools: list[dict]):
+    async def _complete(self, messages: list[dict], tools: list[dict]):
         """每次 LLM 请求前检查完整输入，并记录真实 usage 供估算校准。"""
         self.last_estimated_tokens = (
             estimate_messages_tokens(messages) + estimate_tool_definitions_tokens(tools)
         )
         if self.last_estimated_tokens > self.context_window - self.reserve_tokens:
             raise ContextOverflowError("请求上下文超过预算")
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=self.temperature,

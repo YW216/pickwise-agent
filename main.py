@@ -1,8 +1,10 @@
 
+import asyncio
+
 from app.multi_agent.orchestrator import MultiAgentOrchestrator
 
 
-def main():
+async def main():
     agent = MultiAgentOrchestrator()
 
     print("=" * 50)
@@ -20,7 +22,7 @@ def main():
             user_input = input("👤 你: ").strip()
         except (EOFError, KeyboardInterrupt):
             agent.save()
-            agent.close()
+            await agent.close()
             print("\n再见，欢迎下次光临！")
             break
 
@@ -29,7 +31,7 @@ def main():
 
         if user_input.lower() in ("quit", "exit"):
             agent.save()
-            agent.close()
+            await agent.close()
             print("再见，欢迎下次光临！")
             break
 
@@ -76,7 +78,7 @@ def main():
 
         try:
             # chat() 返回 reply 文本（设计文档十一节，P1 起）
-            response = agent.chat(user_input)
+            response = await agent.chat(user_input)
             # 分隔线划清"过程流（路由/思考/工具）"与"最终结果"的边界
             print("\n" + "─" * 50)
             print(f"🤖 小P最终回复: {response}\n")
@@ -86,4 +88,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
