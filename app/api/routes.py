@@ -128,23 +128,6 @@ async def chat(
     return _chat_response(identity, outcome, request_id)
 
 
-@sessions_router.delete("/{session_id}")
-async def reset_session(
-    session_id: str,
-    request: Request,
-    user: AnonymousIdentity = Depends(require_csrf),
-    manager: SessionManager = Depends(get_session_manager),
-):
-    """重置窗口：排队清空历史，保留 UUID、用户长期记忆与收藏。"""
-    request_id = new_request_id()
-    identity = _identity_for(user, session_id)
-    try:
-        await manager.reset(identity)
-    except SessionManagerError as exc:
-        return session_error(exc, request_id)
-    return success({"session_id": identity.session_id}, request_id)
-
-
 def _identity_for(user: AnonymousIdentity, session_id: str) -> SessionIdentity:
     """凭证 user_id + 请求方窗口编号组身份；UUID 非法 → 422。
 

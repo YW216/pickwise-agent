@@ -4,19 +4,20 @@
 
 * ``(user_id, session_id)`` 是会话的唯一键；
 * ``_entries`` 缓存当前进程正在使用的编排器；
-* 每个窗口一把 ``asyncio.Lock``，保证同一窗口的 chat/reset 不同时修改
+* 每个窗口一把 ``asyncio.Lock``，保证同一窗口的多个 chat 不同时修改
   同一个 ``MultiAgentOrchestrator``。
 
-文件归属校验、TTL 回收和优雅关闭仍然保留；显式 FIFO 消费者、复杂状态机
-和 SessionManager 专属线程池不再需要。同步文件操作和同步 factory 统一走
-``run_in_executor``，不会阻塞 FastAPI 事件循环。
+文件归属校验、TTL 回收和优雅关闭仍然保留；显式 FIFO 消费者、管理锁和
+独立忙闲事件不再需要。窗口忙闲只看 ``entry.lock``；``closing`` 只用于
+提示清理中的窗口。同步文件操作和同步 factory 统一走 ``asyncio.to_thread``，
+不会阻塞 FastAPI 事件循环。管理方法只在同一个事件循环中调用；不含 await
+的注册表和状态更新无需加锁。
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -40,16 +41,12 @@ class SessionNotFound(SessionManagerError):
     code = "SESSION_NOT_FOUND"
 
 
-class SessionCreateBusy(SessionManagerError):
-    code = "SESSION_CREATE_BUSY"
-
-
-class SessionQueueFull(SessionManagerError):
-    code = "SESSION_QUEUE_FULL"
-
-
 class SessionCapacityFull(SessionManagerError):
     code = "SESSION_CAPACITY_FULL"
+
+
+class SessionBusy(SessionManagerError):
+    code = "SESSION_BUSY"
 
 
 class SessionClosing(SessionManagerError):
@@ -80,27 +77,26 @@ class ShutdownReport:
 
 @dataclass
 class _Entry:
-    """一个窗口在当前进程里的运行记录。"""
+    """一个窗口在当前进程里的运行记录。
+
+    ``lock`` 就是"这个窗口忙不忙"的唯一信号：谁拿到锁，谁在用窗口。
+    ``closing`` 只是提示新请求不要再进入；真正等待仍靠窗口锁。
+    """
 
     identity: SessionIdentity
     last_completed_at: float
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    idle: asyncio.Event = field(default_factory=asyncio.Event)
     agent: Any = None
-    pending: int = 0
-    running: bool = False
-    state: str = "active"  # active | closing | closed
-    init_error: BaseException | None = None
-
-    def __post_init__(self) -> None:
-        self.idle.set()
+    busy: bool = False        # 本轮 chat 正在执行（同步检查并占用，忙时拒绝）
+    save_failed: bool = False # 本轮持久化失败：TTL 暂不回收，保留内存中的最新数据
+    closing: bool = False
 
 
 class SessionManager:
     """管理 ``(user_id, session_id) -> MultiAgentOrchestrator``。
 
-    ``max_pending_per_session`` 只限制等待同一窗口锁的请求数。
-    ``max_parallel_jobs`` 限制同步文件/factory 操作，不限制异步模型调用；
+    同一窗口的请求直接等待窗口锁，不单独计数或限制等待请求数。
+    同步文件/factory 走默认线程池，不限制异步模型调用；
     模型并发由应用级 LLM semaphore 管理。
     """
 
@@ -112,24 +108,14 @@ class SessionManager:
         clock: Callable[[], float] | None = None,
         ttl_seconds: float = 1800,
         max_sessions: int = 100,
-        max_parallel_jobs: int = 4,
-        max_pending_per_session: int = 8,
-        max_pending_creates: int = 16,
-        executor: Executor | None = None,
     ):
         self._session_dir = Path(session_dir)
         self._factory = factory
         self._clock = clock or time.monotonic
         self._ttl_seconds = ttl_seconds
         self._max_sessions = max_sessions
-        self._max_pending = max_pending_per_session
-        self._executor = executor
-        self._blocking_slots = asyncio.Semaphore(max_parallel_jobs)
-        self._max_pending_creates = max_pending_creates
 
         self._entries: dict[tuple[str, str], _Entry] = {}
-        self._registry_lock = asyncio.Lock()
-        self._create_pending = 0
         self._closed = False
         self._cleanup_task: asyncio.Task | None = None
 
@@ -141,32 +127,15 @@ class SessionManager:
 
     @staticmethod
     def _check_admittable(entry: _Entry) -> None:
-        if entry.state != "active":
+        if entry.closing:
             raise SessionClosing("窗口正在关闭，请稍后重试")
-
-    async def _run_blocking(self, fn: Callable[..., Any], *args: Any) -> Any:
-        """把同步文件/factory 放到线程池，避免卡住事件循环。"""
-
-        loop = asyncio.get_running_loop()
-        async with self._blocking_slots:
-            return await loop.run_in_executor(
-                self._executor, lambda: fn(*args),
-            )
 
     # ---- 创建窗口 ----
 
     async def create_session(self, user_id: str) -> SessionIdentity:
         self._check_open()
         validate_user_id(user_id)
-        async with self._registry_lock:
-            if self._create_pending >= self._max_pending_creates:
-                raise SessionCreateBusy("窗口创建请求过多，请稍后重试")
-            self._create_pending += 1
-        try:
-            return await self._run_blocking(self._create_session_file, user_id)
-        finally:
-            async with self._registry_lock:
-                self._create_pending -= 1
+        return await asyncio.to_thread(self._create_session_file, user_id)
 
     def _create_session_file(self, user_id: str) -> SessionIdentity:
         for _ in range(5):
@@ -181,52 +150,41 @@ class SessionManager:
             return identity
         raise SessionManagerError("无法分配新的窗口编号（连续冲突）")
 
-    # ---- 定位窗口 ----
-
+    # ---- 定位运行窗口 ----
+    # 首次聊天才创建 Entry；再次聊天复用同一个 Entry。
     async def _ensure_entry(self, identity: SessionIdentity) -> _Entry:
         self._check_open()
         key = (identity.user_id, identity.session_id)
 
-        async with self._registry_lock:
-            entry = self._entries.get(key)
-            if entry is not None:
-                self._check_admittable(entry)
-                return entry
-            if len(self._entries) >= self._max_sessions:
-                victim = self._oldest_idle_locked()
-                if victim is None:
-                    raise SessionCapacityFull(
-                        f"运行窗口数已达上限（{self._max_sessions}）且无空闲可回收"
-                    )
-                victim.state = "closing"
-            else:
-                victim = None
+        entry = self._entries.get(key)
+        if entry is not None:
+            self._check_admittable(entry)
+            return entry
+        # 满了直接拒绝，不在这里腾位：回收职责完全归 cleanup 循环
+        # （60 秒周期自动回收超时窗口），避免 ensure 承担连锁回收。
+        if len(self._entries) >= self._max_sessions:
+            raise SessionCapacityFull(
+                f"运行窗口数已达上限（{self._max_sessions}），请稍后重试"
+            )
 
-        if victim is not None:
-            error = await self._reclaim_one(victim)
-            if error is not None:
-                raise SessionCapacityFull(
-                    f"运行窗口数已达上限，空闲窗口回收失败：{error}"
-                )
-            return await self._ensure_entry(identity)
-
-        found = await self._run_blocking(self._verify_owned_file, identity)
+        # Entry 可以被回收，但重建前仍需校验窗口文件和归属。
+        found = await asyncio.to_thread(self._verify_owned_file, identity)
         if not found:
             raise SessionNotFound("窗口不存在，请先创建")
 
-        async with self._registry_lock:
-            # 文件检查期间可能已有另一个请求完成创建。
-            entry = self._entries.get(key)
-            if entry is not None:
-                self._check_admittable(entry)
-                return entry
-            if len(self._entries) >= self._max_sessions:
-                raise SessionCapacityFull(
-                    f"运行窗口数已达上限（{self._max_sessions}）且无空闲可回收"
-                )
-            entry = _Entry(identity=identity, last_completed_at=self._clock())
-            self._entries[key] = entry
+        # await 期间服务可能关闭、其他请求可能创建 Entry 或占满容量。
+        self._check_open()
+        entry = self._entries.get(key)
+        if entry is not None:
+            self._check_admittable(entry)
             return entry
+        if len(self._entries) >= self._max_sessions:
+            raise SessionCapacityFull(
+                f"运行窗口数已达上限（{self._max_sessions}）且无空闲可回收"
+            )
+        entry = _Entry(identity=identity, last_completed_at=self._clock())
+        self._entries[key] = entry
+        return entry
 
     def _verify_owned_file(self, identity: SessionIdentity) -> bool:
         loaded = load_session(
@@ -234,102 +192,56 @@ class SessionManager:
         )
         return loaded is not None
 
-    def _oldest_idle_locked(self) -> _Entry | None:
-        idle = [
-            entry for entry in self._entries.values()
-            if entry.state == "active"
-            and not entry.running
-            and entry.pending == 0
-            and entry.agent is not None
-        ]
-        return min(idle, key=lambda item: item.last_completed_at) if idle else None
-
-    # ---- chat / reset ----
+    # ---- chat ----
 
     async def chat(self, identity: SessionIdentity, message: str) -> ChatOutcome:
         entry = await self._ensure_entry(identity)
-        return await self._run_serialized(
+        outcome = await self._run_serialized(
             entry, lambda agent: self._chat_agent(agent, message),
         )
-
-    async def reset(self, identity: SessionIdentity) -> None:
-        entry = await self._ensure_entry(identity)
-
-        async def operation(agent: Any) -> None:
-            await self._run_blocking(agent.reset)
-
-        await self._run_serialized(entry, operation)
+        # 持久化失败标记：TTL 暂不回收该窗口，避免丢失内存中的最新数据
+        entry.save_failed = not outcome.persisted
+        return outcome
 
     async def _run_serialized(
         self, entry: _Entry, operation: Callable[[Any], Any],
     ) -> Any:
-        """用一把窗口锁串行执行；不同窗口不共享这把锁，因此可并行。"""
+        """chat 专用闸口：busy 同步"检查并占用"，忙时立即拒绝，不排队。
 
-        queued = False
-        acquired = False
-        async with self._registry_lock:
-            self._check_admittable(entry)
-            if entry.running:
-                if entry.pending >= self._max_pending:
-                    raise SessionQueueFull(
-                        f"窗口排队已达上限（{self._max_pending}）"
-                    )
-                entry.pending += 1
-                queued = True
-            entry.running = True
-            entry.idle.clear()
-
+        busy 的检查与设置之间没有 await，原子完成——这比
+        ``lock.locked()`` 检查更严格（后者在锁刚释放但有等待者时会漏判，
+        导致新请求被迫挂起排队）。窗口锁仍保留，用于与 close/cleanup
+        的回收路径互斥；不同窗口的锁互不相同，因此可并行。
+        """
+        if entry.closing:
+            raise SessionClosing("窗口正在关闭，请稍后重试")
+        if entry.busy:
+            raise SessionBusy("窗口正在处理上一条消息，请稍后再试")
+        entry.busy = True
         try:
-            await entry.lock.acquire()
-            acquired = True
-            if queued:
-                async with self._registry_lock:
-                    entry.pending -= 1
-
-            if entry.state != "active":
-                raise entry.init_error or SessionClosing("窗口正在关闭，请稍后重试")
-
-            if entry.agent is None:
+            async with entry.lock:
+                # 拿锁期间，窗口可能已经开始关闭。
+                if self._closed or entry.closing:
+                    raise SessionClosing("窗口正在关闭，请稍后重试")
                 try:
-                    entry.agent = await self._run_blocking(
-                        self._factory, entry.identity,
-                    )
-                except Exception as exc:
-                    entry.state = "closed"
-                    entry.init_error = exc
-                    async with self._registry_lock:
+                    if entry.agent is None:
+                        entry.agent = await asyncio.to_thread(
+                            self._factory, entry.identity,
+                        )
+                    return await operation(entry.agent)
+                except Exception:
+                    if entry.agent is None:
+                        # 初始化失败：旧 Entry 不再接收等待者，新请求可以重建。
+                        entry.closing = True
                         self._entries.pop(
                             (entry.identity.user_id, entry.identity.session_id),
                             None,
                         )
                     raise
-
-            return await operation(entry.agent)
-        finally:
-            if not acquired:
-                async with self._registry_lock:
-                    if queued:
-                        entry.pending -= 1
-                        # 当前执行还没结束时，窗口仍然是忙的；只有队列已经
-                        # 清空且锁也已释放，才可以让 cleanup/close 处理它。
-                        if entry.pending == 0 and not entry.lock.locked():
-                            entry.running = False
-                            entry.idle.set()
-                    else:
-                        entry.running = False
-                        entry.idle.set()
-            else:
-                async with self._registry_lock:
+                finally:
                     entry.last_completed_at = self._clock()
-                    # 在注册表锁内释放窗口锁，避免下一个等待者先拿到窗口锁，
-                    # 但后一个状态更新还没完成。
-                    entry.lock.release()
-                    if entry.pending == 0:
-                        entry.running = False
-                        entry.idle.set()
-                    else:
-                        # 还有等待者：保持 busy，避免 cleanup/close 抢先回收。
-                        entry.running = True
+        finally:
+            entry.busy = False
 
     async def _chat_agent(self, agent: Any, message: str) -> ChatOutcome:
         reply = await agent.chat(message)
@@ -352,17 +264,16 @@ class SessionManager:
     async def cleanup(self) -> CleanupReport:
         report = CleanupReport()
         now = self._clock()
-        async with self._registry_lock:
-            expired = [
-                entry for entry in self._entries.values()
-                if entry.state == "active"
-                and not entry.running
-                and entry.pending == 0
-                and entry.agent is not None
-                and now - entry.last_completed_at >= self._ttl_seconds
-            ]
-            for entry in expired:
-                entry.state = "closing"
+        expired = [
+            entry for entry in self._entries.values()
+            if not entry.closing
+            and not entry.busy          # 正在执行的窗口本轮跳过
+            and not entry.save_failed   # 持久化失败的窗口暂不回收
+            and entry.agent is not None
+            and now - entry.last_completed_at >= self._ttl_seconds
+        ]
+        for entry in expired:
+            entry.closing = True
 
         for entry in expired:
             error = await self._reclaim_one(entry)
@@ -390,18 +301,14 @@ class SessionManager:
         return self._cleanup_task
 
     async def _reclaim_one(self, entry: _Entry) -> str | None:
+        """TTL 回收：只释放 agent 资源，不 save——每轮 chat 结束时
+        agent 已自行保存（orchestrator._save_safely），内存中没有未落盘数据。"""
         try:
-            await entry.idle.wait()
-            if entry.agent is not None:
-                await self._run_blocking(entry.agent.save)
-                await entry.agent.close()
+            await self._close_entry(entry, save=False)
         except Exception as exc:
-            entry.state = "active"
+            entry.closing = False
             return f"{type(exc).__name__}: {exc}"
 
-        entry.state = "closed"
-        async with self._registry_lock:
-            self._entries.pop((entry.identity.user_id, entry.identity.session_id), None)
         return None
 
     # ---- 服务关闭 ----
@@ -415,35 +322,43 @@ class SessionManager:
             self._cleanup_task = None
 
         report = ShutdownReport()
-        async with self._registry_lock:
-            entries = list(self._entries.values())
-            for entry in entries:
-                entry.state = "closing"
+        entries = list(self._entries.values())
+        for entry in entries:
+            entry.closing = True
 
         for entry in entries:
             try:
-                await asyncio.wait_for(entry.idle.wait(), timeout=grace_seconds)
+                await asyncio.wait_for(
+                    self._close_entry(entry, save=True), timeout=grace_seconds,
+                )
             except asyncio.TimeoutError:
                 report.timed_out.append(entry.identity.session_id)
                 report.unsaved.append(entry.identity.session_id)
                 continue
-            try:
-                if entry.agent is not None:
-                    await self._run_blocking(entry.agent.save)
-                    await entry.agent.close()
             except Exception as exc:
                 report.failed[entry.identity.session_id] = (
                     f"{type(exc).__name__}: {exc}"
                 )
                 report.unsaved.append(entry.identity.session_id)
                 continue
-            entry.state = "closed"
-            async with self._registry_lock:
-                self._entries.pop(
-                    (entry.identity.user_id, entry.identity.session_id), None,
-                )
             report.closed.append(entry.identity.session_id)
         return report
+
+    async def _close_entry(self, entry: _Entry, *, save: bool = True) -> None:
+        """拿到窗口锁后（按需）保存并关闭，避免和聊天同时操作 Agent。
+
+        save=True 用于服务关闭（防止进程退出前有未保存状态）；
+        save=False 用于 TTL 回收（每轮 chat 已自行保存，无需重复）。
+        """
+        async with entry.lock:
+            if entry.agent is not None:
+                if save:
+                    await asyncio.to_thread(entry.agent.save)
+                await entry.agent.close()
+                entry.agent = None
+            key = (entry.identity.user_id, entry.identity.session_id)
+            if self._entries.get(key) is entry:
+                self._entries.pop(key)
 
     def session_count(self) -> int:
         return len(self._entries)

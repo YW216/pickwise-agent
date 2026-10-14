@@ -186,27 +186,6 @@ def test_request_body_too_large_is_413(client):
     assert resp.json()["error"]["code"] == "REQUEST_TOO_LARGE"
 
 
-# ---------- reset 生命周期 ----------
-
-def test_reset_keeps_uuid_and_history_continues(client, factory):
-    user = _init_user(client)
-    session_id = _create_session(client, user)
-    client.post("/api/chat", json={"session_id": session_id, "message": "一"},
-                headers=_auth_headers(user))
-    agent = factory.agents[f"{user['user_id']}:{session_id}"]
-
-    resp = client.delete(f"/api/sessions/{session_id}",
-                         headers=_auth_headers(user))
-    assert resp.status_code == 200
-    assert agent.resets == 1
-
-    resp = client.post("/api/chat", json={"session_id": session_id,
-                                          "message": "二"},
-                       headers=_auth_headers(user))
-    assert resp.status_code == 200  # 同一 UUID 继续
-    assert len(agent.raw_messages) == 2  # 历史已清，只剩新的一轮
-
-
 # ---------- 两个应用实例互不共享 ----------
 
 def test_two_app_instances_do_not_share_managers(tmp_path, factory):

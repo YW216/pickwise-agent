@@ -15,13 +15,13 @@ from fastapi.responses import JSONResponse
 
 from app.api.auth import COOKIE_NAME
 from app.services.session_manager import (
+    SessionBusy,
     SessionCapacityFull,
+    SessionBusy,
     SessionClosing,
-    SessionCreateBusy,
     SessionManagerClosed,
     SessionManagerError,
     SessionNotFound,
-    SessionQueueFull,
 )
 
 MAX_BODY_BYTES = 64 * 1024  # 请求体大小上限（初值 64 KiB，按实际字节校验）
@@ -34,9 +34,9 @@ class ProductBusy(Exception):
 # SessionManager 异常 → (HTTP 状态码, 稳定错误码)
 _SESSION_ERROR_MAP: list[tuple[type[Exception], int, str]] = [
     (SessionNotFound, 404, "SESSION_NOT_FOUND"),
-    (SessionQueueFull, 429, "SESSION_QUEUE_FULL"),
-    (SessionCreateBusy, 429, "SESSION_CREATE_BUSY"),
     (SessionCapacityFull, 503, "SESSION_CAPACITY_FULL"),
+    (SessionBusy, 429, "SESSION_BUSY"),
+    (SessionBusy, 429, "SESSION_BUSY"),
     (SessionClosing, 503, "SESSION_CLOSING"),
     (SessionManagerClosed, 503, "SERVICE_STOPPING"),
 ]

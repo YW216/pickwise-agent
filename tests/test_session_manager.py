@@ -14,12 +14,12 @@ import pytest
 
 from app.identity import SessionIdentity
 from app.services.session_manager import (
+    SessionBusy,
     SessionCapacityFull,
-    SessionCreateBusy,
+    SessionClosing,
     SessionManager,
     SessionManagerClosed,
     SessionNotFound,
-    SessionQueueFull,
 )
 
 
@@ -199,16 +199,24 @@ def test_concurrent_first_chat_creates_single_entry(tmp_path):
     async def main():
         clock = FakeClock()
         recorder = FactoryRecorder()
+        gate = asyncio.Event()
+        recorder._make = lambda identity: FakeAgent(
+            identity, chat_gate=gate)
         mgr = make_manager(tmp_path, clock, recorder)
         identity = await mgr.create_session(uid("u1"))
-        outcomes = await asyncio.gather(
-            mgr.chat(identity, "m1"),
-            mgr.chat(identity, "m2"),
-            mgr.chat(identity, "m3"),
-        )
-        assert [o.reply for o in outcomes] == ["reply:m1", "reply:m2", "reply:m3"]
+        # 并发首访：第一个拿到锁执行，其余被 SessionBusy 拒绝（不排队），
+        # 但 Entry 仍只建一次（拒绝发生在 _ensure_entry 之后的拿锁阶段）。
+        tasks = [asyncio.create_task(mgr.chat(identity, m))
+                 for m in ("m1", "m2", "m3")]
+        await asyncio.sleep(0.05)
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        assert outcomes[0].reply == "reply:m1"
+        assert all(isinstance(o, SessionBusy) for o in outcomes[1:])
         assert len(recorder.calls) == 1
         assert mgr.session_count() == 1
+
+        gate.set()
+        assert (await mgr.chat(identity, "m2")).reply == "reply:m2"
 
     asyncio.run(main())
 
@@ -234,7 +242,8 @@ def test_different_users_and_windows_get_different_agents(tmp_path):
 
 # ---------- P3-2：FIFO、并行、容量 ----------
 
-def test_same_window_chat_reset_serialized_in_order(tmp_path):
+def test_same_window_busy_chat_is_rejected_then_available(tmp_path):
+    """窗口忙（上一条还在跑）时新 chat 直接拒绝，不排队；完成后恢复可用。"""
     async def main():
         clock = FakeClock()
         recorder = FactoryRecorder()
@@ -247,16 +256,21 @@ def test_same_window_chat_reset_serialized_in_order(tmp_path):
         await wait_until(lambda: len(recorder.agents) == 1)  # factory 完成
         agent = next(iter(recorder.agents.values()))
         await wait_until(agent.chat_started.is_set)  # m1 已在执行并阻塞
-        second = asyncio.create_task(mgr.chat(identity, "m2"))
-        reset_task = asyncio.create_task(mgr.reset(identity))
-        third = asyncio.create_task(mgr.chat(identity, "m3"))
 
-        gate.set()  # 放行 m1，其余按排队顺序执行
-        await asyncio.gather(first, second, reset_task, third)
-        agent = recorder.agents[f"{identity.user_id}:{identity.session_id}"]
-        assert agent.chat_total == 3            # m1、m2、m3 都执行过
-        assert agent.resets == 1                # reset 发生在 m2 之后（清掉了 m2 记录）
-        assert agent.chat_calls == ["m3"]       # m3 在 reset 之后执行
+        # 忙时：并发三连全部被 SessionBusy 拒绝（不排队、不执行）
+        outcomes = await asyncio.gather(
+            *[mgr.chat(identity, m) for m in ("m2", "m3", "m4")],
+            return_exceptions=True,
+        )
+        assert all(isinstance(o, SessionBusy) for o in outcomes)
+        assert agent.chat_calls == ["m1"]  # 只有 m1 在跑
+
+        gate.set()
+        await first
+        # 完成后：同一窗口恢复可用
+        reply = await mgr.chat(identity, "m2")
+        assert reply.reply == "reply:m2"
+        assert agent.chat_calls == ["m1", "m2"]
 
     asyncio.run(main())
 
@@ -283,29 +297,32 @@ def test_different_windows_run_in_parallel(tmp_path):
     asyncio.run(main())
 
 
-def test_queue_full_rejected(tmp_path):
+def test_busy_window_rejects_all_concurrent_chats(tmp_path):
+    """忙窗口对 10 个并发新请求全部立即拒绝（不排队、无等待）。"""
     async def main():
         clock = FakeClock()
         gate = asyncio.Event()
         recorder = FactoryRecorder(
             make_agent=lambda identity: FakeAgent(identity, chat_gate=gate),
         )
-        mgr = make_manager(tmp_path, clock, recorder, max_pending_per_session=1)
+        mgr = make_manager(tmp_path, clock, recorder)
         identity = await mgr.create_session(uid("u1"))
         running = asyncio.create_task(mgr.chat(identity, "m1"))
-        await wait_until(lambda: len(recorder.agents) == 1)  # factory 完成
+        await wait_until(lambda: len(recorder.agents) == 1)
         agent = next(iter(recorder.agents.values()))
-        await wait_until(agent.chat_started.is_set)  # 占用执行位
+        await wait_until(agent.chat_started.is_set)
 
-        queued = asyncio.create_task(mgr.chat(identity, "m2"))  # pending=1
-        key = (identity.user_id, identity.session_id)
-        await wait_until(lambda: mgr._entries[key].pending == 1)  # m1 执行中不占名额、m2 已入队
-        with pytest.raises(SessionQueueFull):
-            await mgr.chat(identity, "m3")  # 排队名额已满
+        outcomes = await asyncio.wait_for(asyncio.gather(
+            *[mgr.chat(identity, f"m{i}") for i in range(2, 12)],
+            return_exceptions=True,
+        ), timeout=5)
+        assert all(isinstance(o, SessionBusy) for o in outcomes)
+        assert agent.chat_calls == ["m1"]
 
         gate.set()
         await running
-        await queued
+        assert agent.chat_calls == ["m1"]
+        assert len(recorder.calls) == 1
 
     asyncio.run(main())
 
@@ -331,49 +348,68 @@ def test_capacity_full_when_no_idle_entry(tmp_path):
     asyncio.run(main())
 
 
-def test_capacity_full_reclaims_longest_idle_first(tmp_path):
+def test_concurrent_first_chats_respect_capacity(tmp_path, monkeypatch):
     async def main():
         clock = FakeClock()
         recorder = FactoryRecorder()
-        mgr = make_manager(tmp_path, clock, recorder, max_sessions=2)
+        mgr = make_manager(tmp_path, clock, recorder, max_sessions=1)
+        win1 = await mgr.create_session(uid("u1"))
+        win2 = await mgr.create_session(uid("u2"))
+        verify_barrier = threading.Barrier(2)
+        original_verify = mgr._verify_owned_file
+
+        def verify(identity):
+            verify_barrier.wait(timeout=3)
+            return original_verify(identity)
+
+        monkeypatch.setattr(mgr, "_verify_owned_file", verify)
+        outcomes = await asyncio.wait_for(
+            asyncio.gather(
+                mgr.chat(win1, "a"), mgr.chat(win2, "b"),
+                return_exceptions=True,
+            ),
+            timeout=5,
+        )
+        assert sum(isinstance(item, SessionCapacityFull) for item in outcomes) == 1
+        replies = [item.reply for item in outcomes if not isinstance(item, BaseException)]
+        assert len(replies) == 1
+        assert replies[0] in {"reply:a", "reply:b"}
+        assert mgr.session_count() == 1
+        assert len(recorder.calls) == 1
+
+    asyncio.run(main())
+
+
+def test_capacity_full_then_cleanup_reclaims(tmp_path):
+    async def main():
+        clock = FakeClock()
+        recorder = FactoryRecorder()
+        mgr = make_manager(tmp_path, clock, recorder, max_sessions=2, ttl_seconds=100)
         win1 = await mgr.create_session(uid("u1"))
         win2 = await mgr.create_session(uid("u2"))
         await mgr.chat(win1, "a")
-        clock.advance(10)      # win2 完成得更晚 → win1 最久未用
-        await mgr.chat(win2, "b")
+        clock.advance(200)          # win1 超时（last=0）
+        await mgr.chat(win2, "b")   # win2 Entry 建立，last=200（新鲜）
         old_agent = recorder.agents[f"{win1.user_id}:{win1.session_id}"]
 
+        # 容量满（win1+win2 两个 Entry）：直接拒绝，ensure 不自动腾位
         win3 = await mgr.create_session(uid("u3"))
-        await mgr.chat(win3, "c")  # 容量满 → 自动回收最久未用的 win1
+        with pytest.raises(SessionCapacityFull):
+            await mgr.chat(win3, "c")
+
+        report = await mgr.cleanup()   # cleanup 只回收超时的 win1
+        assert report.reclaimed == [win1.session_id]
         assert old_agent.closed == 1
         assert win1.session_path(tmp_path).exists()  # 只回收内存，不删窗口文件
+
+        reply = await mgr.chat(win3, "c")  # 腾位后新窗口可用
+        assert reply.reply == "reply:c"
         assert mgr.session_count() == 2
 
     asyncio.run(main())
 
 
 # ---------- P3-3：reset、TTL、close/shutdown ----------
-
-def test_reset_keeps_ownership_and_clears_history(tmp_path):
-    async def main():
-        clock = FakeClock()
-        recorder = FactoryRecorder()
-        mgr = make_manager(tmp_path, clock, recorder)
-        identity = await mgr.create_session(uid("u1"))
-        await mgr.chat(identity, "m1")
-        path = identity.session_path(tmp_path)
-
-        await mgr.reset(identity)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["messages"] == []  # 原子保存空状态
-        assert data["user_id"] == identity.user_id  # 归属保留
-        agent = recorder.agents[f"{identity.user_id}:{identity.session_id}"]
-        assert agent.resets == 1
-        again = await mgr.chat(identity, "m2")  # 同一对象继续可用
-        assert again.reply == "reply:m2"
-
-    asyncio.run(main())
-
 
 def test_ttl_cleanup_reclaims_only_expired_idle(tmp_path):
     async def main():
@@ -473,7 +509,7 @@ def test_close_reports_timed_out_running_window(tmp_path):
 
 # ---------- P3-4：取消与竞态 ----------
 
-def test_cancelled_pending_job_is_skipped(tmp_path):
+def test_close_rejects_waiters_and_waits_for_running_chat(tmp_path):
     async def main():
         clock = FakeClock()
         gate = asyncio.Event()
@@ -483,21 +519,30 @@ def test_cancelled_pending_job_is_skipped(tmp_path):
         mgr = make_manager(tmp_path, clock, recorder)
         identity = await mgr.create_session(uid("u1"))
         running = asyncio.create_task(mgr.chat(identity, "m1"))
-        await wait_until(lambda: len(recorder.agents) == 1)  # factory 完成
-        agent = recorder.agents[f"{identity.user_id}:{identity.session_id}"]
+        await wait_until(lambda: len(recorder.agents) == 1)
+        agent = next(iter(recorder.agents.values()))
         await wait_until(agent.chat_started.is_set)
+        waiting_started = asyncio.Event()
 
-        queued = asyncio.create_task(mgr.chat(identity, "m2"))  # 排队中
-        key = (identity.user_id, identity.session_id)
-        await wait_until(lambda: mgr._entries[key].pending == 1)  # m1 已开始（释放名额）、m2 已入队
-        queued.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await queued
+        async def send_second():
+            waiting_started.set()
+            return await mgr.chat(identity, "m2")
+
+        waiting = asyncio.create_task(send_second())
+        await asyncio.wait_for(waiting_started.wait(), timeout=3)
+        closing = asyncio.create_task(mgr.close(grace_seconds=5))
+        await wait_until(lambda: mgr._closed)
+        assert agent.closed == 0
 
         gate.set()
-        outcome = await running
-        assert outcome.reply == "reply:m1"
-        assert agent.chat_calls == ["m1"]  # 排队中的 m2 被跳过，未执行
+        assert (await running).reply == "reply:m1"
+        with pytest.raises(SessionBusy):  # 忙窗口不排队：等待者一开始就被拒
+            await waiting
+        report = await closing
+        assert report.closed == [identity.session_id]
+        assert report.timed_out == []
+        assert agent.chat_calls == ["m1"]
+        assert agent.closed == 1
 
     asyncio.run(main())
 
@@ -525,17 +570,6 @@ def test_cancelling_waiting_caller_does_not_stop_execution(tmp_path):
     asyncio.run(main())
 
 
-def test_create_busy_when_pending_limit_reached(tmp_path):
-    async def main():
-        clock = FakeClock()
-        recorder = FactoryRecorder()
-        mgr = make_manager(tmp_path, clock, recorder, max_pending_creates=0)
-        with pytest.raises(SessionCreateBusy):
-            await mgr.create_session(uid("u1"))  # 上限为 0：立即拒绝（边界配置验证）
-
-    asyncio.run(main())
-
-
 def test_factory_failure_removes_entry_and_allows_retry(tmp_path):
     async def main():
         clock = FakeClock()
@@ -552,6 +586,38 @@ def test_factory_failure_removes_entry_and_allows_retry(tmp_path):
         outcome = await mgr.chat(identity, "m1")
         assert outcome.reply == "reply:m1"
         assert len(recorder.calls) == 2
+
+    asyncio.run(main())
+
+
+def test_close_during_file_verification_rejects_chat(tmp_path, monkeypatch):
+    async def main():
+        clock = FakeClock()
+        recorder = FactoryRecorder()
+        mgr = make_manager(tmp_path, clock, recorder)
+        identity = await mgr.create_session(uid("u1"))
+        verify_started = threading.Event()
+        verify_release = threading.Event()
+        original_verify = mgr._verify_owned_file
+
+        def verify(identity):
+            verify_started.set()
+            if not verify_release.wait(timeout=3):
+                raise AssertionError("文件校验未被放行")
+            return original_verify(identity)
+
+        monkeypatch.setattr(mgr, "_verify_owned_file", verify)
+        caller = asyncio.create_task(mgr.chat(identity, "m1"))
+        try:
+            await wait_until(verify_started.is_set)
+            await mgr.close()
+        finally:
+            verify_release.set()
+
+        with pytest.raises(SessionManagerClosed):
+            await asyncio.wait_for(caller, timeout=3)
+        assert mgr.session_count() == 0
+        assert recorder.calls == []
 
     asyncio.run(main())
 
