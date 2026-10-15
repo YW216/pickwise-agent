@@ -173,9 +173,9 @@ def test_search_products_filters_by_pg_current_ids(product_database, monkeypatch
         return ["P2"]  # 与断言中的 expr 对应的窗口命中（一致性由断言保证）
 
     _patch_milvus(monkeypatch, fake_hybrid)
-    result = sp.search_products(
+    result = asyncio.run(sp.search_products(
         "轻薄笔记本", category="笔记本", max_price=3500, limit=5, database_url=url,
-    )
+    ))
     assert result["success"]
     # eligible 只含「笔记本 且 当前价 ≤3500」：P1(5000) 出局、P2(3000) 入围
     assert captured["expr"] == 'product_id in ["P2"]'
@@ -193,7 +193,7 @@ def test_search_products_empty_eligible_short_circuits(product_database, monkeyp
         return []
 
     _patch_milvus(monkeypatch, fake_hybrid)
-    result = sp.search_products("任意", max_price=1, database_url=product_database)
+    result = asyncio.run(sp.search_products("任意", max_price=1, database_url=product_database))
     assert not result["success"]
     assert not called["hybrid"]
 
@@ -207,7 +207,7 @@ def test_search_products_truncates_to_limit(product_database, monkeypatch):
         return ["P2", "P1", "P3"]  # 模拟相似度排序的窗口命中
 
     _patch_milvus(monkeypatch, fake_hybrid)
-    result = sp.search_products("商品", limit=2, database_url=product_database)
+    result = asyncio.run(sp.search_products("商品", limit=2, database_url=product_database))
     assert result["success"]
     assert [r["product_id"] for r in result["data"]["results"]] == ["P2", "P1"]
 
@@ -220,7 +220,7 @@ def test_search_products_skips_ids_missing_in_pg(product_database, monkeypatch):
         return ["GHOST", "P1", "P3"]  # GHOST 只在索引里，PG 无此行
 
     _patch_milvus(monkeypatch, fake_hybrid)
-    result = sp.search_products("商品", limit=2, database_url=product_database)
+    result = asyncio.run(sp.search_products("商品", limit=2, database_url=product_database))
     assert result["success"]
     assert [r["product_id"] for r in result["data"]["results"]] == ["P1", "P3"]
 

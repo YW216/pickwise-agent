@@ -19,6 +19,7 @@ PG 当前真值算出符合条件的 ID 集合，再下推 `product_id in [...]`
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 
@@ -27,7 +28,9 @@ from app.agent.rag.milvus_utils import ensure_reachable
 from app.agent.tools.catalog import brief_view
 from app.agent.tools.result import fail, ok
 from app.config.settings import settings
-from app.db.catalog_repo import find_eligible_product_ids, get_products_by_ids
+from app.db.catalog_repo import (
+    aget_products_by_ids, find_eligible_product_ids,
+)
 
 _client = None
 _embedder = None
@@ -134,7 +137,7 @@ def _hybrid_product_ids(
     ]
 
 
-def search_products(
+async def search_products(
     query: str,
     category: str | None = None,
     min_price: int | None = None,
@@ -165,14 +168,16 @@ def search_products(
         return fail("请描述你想找的商品")
 
     try:
-        client = _get_client()
+        # 阶段六：pymilvus 同步客户端的每次网络调用经 to_thread 执行，
+        # 等待期间不阻塞事件循环（AsyncMilvusClient 仍为实验 API，不引入）
+        client = await asyncio.to_thread(_get_client)
         collection = settings.product_collection
-        if not client.has_collection(collection):
+        if not await asyncio.to_thread(client.has_collection, collection):
             return fail(
                 "商品语义索引未初始化，请先运行 build_product_kb.py",
                 {"results": [], "total": 0},
             )
-        client.load_collection(collection)
+        await asyncio.to_thread(client.load_collection, collection)
 
         url = database_url or settings.database_url
         if not url:
@@ -184,7 +189,8 @@ def search_products(
         # 不再漏召回；空集合直接短路为无匹配，不会误当「取消过滤」。
         expr = None
         if category is not None or min_price is not None or max_price is not None:
-            eligible = find_eligible_product_ids(
+            eligible = await asyncio.to_thread(
+                find_eligible_product_ids,
                 url, category=category, min_price=min_price, max_price=max_price,
             )
             if not eligible:
@@ -199,15 +205,16 @@ def search_products(
         # 召回窗口远大于输出量：复核过滤掉个别命中后，槽位由窗口内后续命中
         # 按序补足；窗口取尽仍不足就如实返回较少结果。
         recall = max(limit * 4, 12)
-        vector = _get_embedder().encode_one(query)
-        ids = _hybrid_product_ids(
+        vector = await asyncio.to_thread(_get_embedder().encode_one, query)
+        ids = await asyncio.to_thread(
+            _hybrid_product_ids,
             query, vector, top_k=recall, recall_k=recall, expr=expr,
         )
 
         # 回查 PG 真值组装轻卡片（与 search_catalog 的 brief_view 同构）。
         # 不读进程内快照 PRODUCTS：快照仅在进程启动时加载，PG 改价后即过期；
         # 按命中 id 批量直查（一次 SQL 只取命中几条），价格/名称永远是真值。
-        products_by_id = get_products_by_ids(url, ids)
+        products_by_id = await aget_products_by_ids(url, ids)
         results = []
         for pid in ids:  # 按 Milvus 检索排序输出，不跟 dict 迭代序
             product = products_by_id.get(pid)

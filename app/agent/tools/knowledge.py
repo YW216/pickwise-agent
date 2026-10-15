@@ -9,6 +9,7 @@
 检索器单例缓存，避免每次调用重建索引。
 """
 
+import asyncio
 from typing import Optional
 
 from app.agent.rag.embedder import Embedder
@@ -46,7 +47,7 @@ def reset_retriever() -> None:
     _retriever = None
 
 
-def retrieve_knowledge(query: str, top_k: int = 3) -> dict:
+async def retrieve_knowledge(query: str, top_k: int = 3) -> dict:
     """检索平台知识库（选购指南、参数科普、售后政策、FAQ、配送、会员权益）。
 
     Args:
@@ -62,7 +63,9 @@ def retrieve_knowledge(query: str, top_k: int = 3) -> dict:
         return fail("请提供要检索的问题")
 
     try:
-        retriever = _get_retriever()  #查询并创建检索器，加载索引
+        # 阶段六：检索器构建（Embedder/Milvus 连接/加载索引）与检索调用
+        # 均为同步网络 I/O，统一 to_thread 执行，等待期间不阻塞事件循环
+        retriever = await asyncio.to_thread(_get_retriever)
     except FileNotFoundError:
         # 索引文件不存在——最常见的失败，给出可操作提示
         return fail(
@@ -80,7 +83,7 @@ def retrieve_knowledge(query: str, top_k: int = 3) -> dict:
     # 2026-09-13 切换：dense 单路 → hybrid（dense + BM25，服务端 RRF 融合）。
     # 注意 score 量纲变为 RRF 值（约 0.016~0.033），与旧 COSINE 分不可比；
     # 工具无 score 阈值过滤（9-RAG.md 遗留 #5），下游无绝对值依赖
-    hits = retriever.hybrid_search(query, top_k=top_k)
+    hits = await asyncio.to_thread(retriever.hybrid_search, query, top_k=top_k)
 
     return ok(
         {
