@@ -11,10 +11,10 @@
 
 from app.agent.tools.result import fail, ok
 from app.config.settings import settings
-from app.db.catalog_repo import get_products_by_ids
+from app.db.catalog_repo import aget_products_by_ids
 
 
-def get_detail(product_id: str, database_url: str | None = None) -> dict:
+async def get_detail(product_id: str, database_url: str | None = None) -> dict:
     """查询单个商品的完整详情（含价格与全部参数）。
 
     Args:
@@ -33,7 +33,7 @@ def get_detail(product_id: str, database_url: str | None = None) -> dict:
     if not url:
         return fail("商品服务暂未配置，请稍后再试", {"unavailable": True})
     try:
-        products = get_products_by_ids(url, [product_id])
+        products = await aget_products_by_ids(url, [product_id])
     except Exception:  # noqa: BLE001 —— PG 唯一数据源：失败显式 fail（不静默回退旧快照）
         return fail("商品服务暂时不可用，请稍后再试", {"unavailable": True})
 
@@ -44,7 +44,7 @@ def get_detail(product_id: str, database_url: str | None = None) -> dict:
     return ok({"product": product})
 
 
-def compare_products(product_ids: list[str], database_url: str | None = None) -> dict:
+async def compare_products(product_ids: list[str], database_url: str | None = None) -> dict:
     """对比多个商品的同维度参数（2-4 款，一次传入全部 ID）。
 
     Args:
@@ -71,7 +71,7 @@ def compare_products(product_ids: list[str], database_url: str | None = None) ->
     if not url:
         return fail("商品服务暂未配置，请稍后再试", {"unavailable": True})
     try:
-        products_by_id = get_products_by_ids(url, ordered)
+        products_by_id = await aget_products_by_ids(url, ordered)
     except Exception:  # noqa: BLE001 —— 同上：显式 fail，不回退
         return fail("商品服务暂时不可用，请稍后再试", {"unavailable": True})
 

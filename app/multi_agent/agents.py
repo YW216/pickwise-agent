@@ -13,7 +13,6 @@ from app.agent.context_budget import (
     tool_result_view,
 )
 from app.agent.tools.manager import ToolManager
-from app.services.async_runtime import run_sync
 from app.prompts.agents import (
     CONSULT_MULTI_PROMPT,
     CONSULT_PROMPT,
@@ -138,10 +137,9 @@ class SubAgent:
                 # 解析 → 校验 → 熔断 → 执行 → 序列化，全部收口在 ToolManager
                 # （三道闸门见其方法说明）。参数用模型给的原始文本打印：
                 # 连"参数是坏 JSON"这种情形也能如实显示。
-                # 工具仍是同步实现（阶段三切换）：统一 to_thread 出口，
-                # 避免在事件循环内阻塞（PG/Milvus 网络调用）
-                result_str = await run_sync(
-                    self.tool_manager.execute_call_as_message,
+                # 阶段三：异步工具入口——async 工具直接 await，
+                # 同步工具在 to_thread 中执行，等待期间不阻塞事件循环
+                result_str = await self.tool_manager.aexecute_call_as_message(
                     tc.function.name, tc.function.arguments, seen,
                 )
                 

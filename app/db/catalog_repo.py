@@ -12,14 +12,15 @@ brief 形状（与 tools/catalog.brief_view 一致，Agent 合并零成本）：
 summary = introduction 首段截断 64 字。
 """
 
+import asyncio
 import json
 
 import psycopg
 
-from app.db.connection import connect
+from app.db.connection import _pool_for, connect
 
 
-def search_candidates(
+async def search_candidates(
     database_url: str,
     query: str | None = None,
     brand: str | None = None,
@@ -51,12 +52,12 @@ def search_candidates(
         ORDER BY product_id
         LIMIT %(lim)s
     """
-    with connect(database_url) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, {"cat": category, "brand": brand,
-                              "bmin": budget_min, "bmax": budget_max,
-                              "q": query, "lim": limit})
-            rows = cur.fetchall()
+    async with (await _pool_for(database_url)).connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql, {"cat": category, "brand": brand,
+                                    "bmin": budget_min, "bmax": budget_max,
+                                    "q": query, "lim": limit})
+            rows = await cur.fetchall()
     candidates = [
         {"product_id": pid, "name": name, "brand": brand,
          "category": cat, "price": price, "summary": summary}
@@ -67,7 +68,7 @@ def search_candidates(
     return {"candidates": candidates, "total": len(candidates), "matched": matched}
 
 
-def search_nearest(
+async def search_nearest(
     database_url: str,
     query: str | None = None,
     brand: str | None = None,
@@ -91,12 +92,12 @@ def search_nearest(
                       ELSE ABS(price - %(bmax)s::numeric) END
         LIMIT %(lim)s
     """
-    with connect(database_url) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, {"cat": category, "brand": brand,
-                              "bmin": budget_min, "bmax": budget_max,
-                              "q": query, "lim": limit})
-            rows = cur.fetchall()
+    async with (await _pool_for(database_url)).connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql, {"cat": category, "brand": brand,
+                                    "bmin": budget_min, "bmax": budget_max,
+                                    "q": query, "lim": limit})
+            rows = await cur.fetchall()
     candidates = [
         {"product_id": pid, "name": name, "brand": brand,
          "category": cat, "price": price, "summary": summary}
@@ -133,20 +134,43 @@ def find_eligible_product_ids(
             return [row[0] for row in cur.fetchall()]
 
 
+_SQL_PRODUCTS_BY_IDS = """
+    SELECT product_id, name, brand, category, price, specs, introduction
+    FROM products
+    WHERE product_id = ANY(%(ids)s)
+    ORDER BY product_id
+"""
+
+
 def get_products_by_ids(database_url: str, ids: list[str]) -> dict:
-    """按 ID 批量取完整商品（含 specs/introduction 全字段），缺 ID 不在结果中。"""
+    """同步壳：search_products（Milvus+PG 混合体，阶段六切）与脚本使用。"""
     if not ids:
         return {}
-    sql = """
-        SELECT product_id, name, brand, category, price, specs, introduction
-        FROM products
-        WHERE product_id = ANY(%(ids)s)
-        ORDER BY product_id
-    """
     with connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, {"ids": ids})
+            cur.execute(_SQL_PRODUCTS_BY_IDS, {"ids": ids})
             rows = cur.fetchall()
+    return _rows_to_products(rows)
+
+
+async def aget_products_by_ids(database_url: str, ids: list[str]) -> dict:
+    """异步壳：get_detail / compare_products（chat 链路）使用。"""
+    if not ids:
+        return {}
+    async with (await _pool_for(database_url)).connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(_SQL_PRODUCTS_BY_IDS, {"ids": ids})
+            rows = await cur.fetchall()
+    return _rows_to_products(rows)
+
+
+def _rows_to_products(rows) -> dict:
+    return {
+        pid: {"product_id": pid, "name": name, "brand": brand,
+              "category": cat, "price": price,
+              "specs": specs, "introduction": intro}
+        for pid, name, brand, cat, price, specs, intro in rows
+    }
     return {
         pid: {"product_id": pid, "name": name, "brand": brand,
               "category": cat, "price": price,

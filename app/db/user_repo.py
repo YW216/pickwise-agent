@@ -1,6 +1,6 @@
 """用户收藏：所有读写显式限定用户，迁移保留原单用户数据。"""
 
-from app.db.connection import connect
+from app.db.connection import _pool_for, connect
 from app.identity import validate_user_id
 
 
@@ -44,8 +44,8 @@ def init_user_schema(database_url: str, *, legacy_user_id: str = "default") -> i
     return imported
 
 
-def get_favorites(database_url: str, user_id: str, *,
-                  category: str | None = None, limit: int = 20) -> list[dict]:
+async def get_favorites(database_url: str, user_id: str, *,
+                        category: str | None = None, limit: int = 20) -> list[dict]:
     """用户收藏关联商品真值；已经删除的商品不返回。"""
     validate_user_id(user_id)
     sql = """
@@ -57,10 +57,10 @@ def get_favorites(database_url: str, user_id: str, *,
         ORDER BY f.added_at, f.product_id
         LIMIT %(lim)s
     """
-    with connect(database_url) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, {"uid": user_id, "cat": category, "lim": max(1, min(limit, 20))})
-            rows = cur.fetchall()
+    async with (await _pool_for(database_url)).connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql, {"uid": user_id, "cat": category, "lim": max(1, min(limit, 20))})
+            rows = await cur.fetchall()
     return [
         {"product_id": pid, "name": name, "brand": brand, "category": cat,
          "price": price, "summary": summary or ""}
@@ -68,30 +68,30 @@ def get_favorites(database_url: str, user_id: str, *,
     ]
 
 
-def add_favorite(database_url: str, user_id: str, product_id: str) -> bool:
+async def add_favorite(database_url: str, user_id: str, product_id: str) -> bool:
     """幂等增加当前用户收藏；商品不存在时由外键拒绝。"""
     validate_user_id(user_id)
-    with connect(database_url) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
+    async with (await _pool_for(database_url)).connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
                 "INSERT INTO user_favorites (user_id, product_id) VALUES (%s, %s)"
                 " ON CONFLICT (user_id, product_id) DO NOTHING",
                 (user_id, product_id),
             )
             changed = cur.rowcount > 0
-        conn.commit()
+        await conn.commit()
     return changed
 
 
-def remove_favorite(database_url: str, user_id: str, product_id: str) -> bool:
+async def remove_favorite(database_url: str, user_id: str, product_id: str) -> bool:
     """只删除指定用户的收藏，不影响其他用户收藏同一商品。"""
     validate_user_id(user_id)
-    with connect(database_url) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
+    async with (await _pool_for(database_url)).connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
                 "DELETE FROM user_favorites WHERE user_id = %s AND product_id = %s",
                 (user_id, product_id),
             )
             changed = cur.rowcount > 0
-        conn.commit()
+        await conn.commit()
     return changed

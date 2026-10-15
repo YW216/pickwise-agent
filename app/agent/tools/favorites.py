@@ -8,8 +8,9 @@ from app.db.user_repo import get_favorites
 from app.agent.tools.result import fail, ok
 
 
-def get_user_favorites(category: str | None = None, limit: int = 20, *,
-                       user_id: str | None = None, database_url: str | None = None) -> dict:
+async def get_user_favorites(category: str | None = None, limit: int = 20, *,
+                             user_id: str | None = None,
+                             database_url: str | None = None) -> dict:
     """查询当前用户收藏的商品。
 
     Args:
@@ -26,7 +27,7 @@ def get_user_favorites(category: str | None = None, limit: int = 20, *,
         return fail("收藏服务暂未配置", {"favorites": [], "total": 0,
                                          "unavailable": True})
     try:
-        items = get_favorites(database_url, user_id, category=category, limit=limit)
+        items = await get_favorites(database_url, user_id, category=category, limit=limit)
     except Exception:
         return fail("收藏服务暂时不可用，请稍后再试",
                     {"favorites": [], "total": 0, "unavailable": True})

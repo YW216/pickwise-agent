@@ -15,6 +15,7 @@ MCP 后续接入时在此扩展 `_init_mcp`；`use_mcp` 参数保留占位，
 from typing import Optional
 
 from app.agent.tools.registry import TOOL_DEFINITIONS as LOCAL_TOOL_DEFINITIONS
+from app.agent.tools.registry import aexecute_tool as local_aexecute_tool
 from app.agent.tools.registry import execute_tool as local_execute_tool
 from app.agent.tools.registry import to_tool_message_content
 from app.agent.tools.registry import bind_tool_handlers
@@ -116,6 +117,34 @@ class ToolManager:
         if error:
             return to_tool_message_content(fail(error))
         return self.execute_tool_as_message(name, arguments, seen)
+
+    async def aexecute_tool(
+        self, name: str, arguments: dict, seen: dict[str, int] | None = None,
+    ) -> dict:
+        """异步执行工具（阶段三）：async 工具直接 await，同步工具 to_thread。"""
+        source = self._tool_source.get(name)
+        if source == "local":
+            return await local_aexecute_tool(
+                name, arguments, seen, handlers=self._handlers,
+            )
+        return fail(f"未知工具: {name}")
+
+    async def aexecute_tool_as_message(
+        self, name: str, arguments: dict, seen: dict[str, int] | None = None,
+    ) -> str:
+        """异步执行并序列化为 tool 消息 content。"""
+        result = await self.aexecute_tool(name, arguments, seen)
+        return to_tool_message_content(result)
+
+    async def aexecute_call_as_message(
+        self, name: str, raw_arguments: str, seen: dict[str, int] | None = None,
+    ) -> str:
+        """Agent 循环的异步工具入口：与 execute_call_as_message 同一套闸门，
+        但执行阶段不阻塞事件循环（async 工具 await / 同步工具 to_thread）。"""
+        arguments, error = parse_tool_arguments(raw_arguments)
+        if error:
+            return to_tool_message_content(fail(error))
+        return await self.aexecute_tool_as_message(name, arguments, seen)
 
     def close(self):
         """清理资源（MCP 接入后用于关闭连接）。"""

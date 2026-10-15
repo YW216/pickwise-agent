@@ -9,6 +9,8 @@
 from pathlib import Path
 from uuid import uuid4
 
+import asyncio
+
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
@@ -63,20 +65,20 @@ def set_price(url: str, pid: str, price: int) -> None:
 
 def test_get_detail_returns_current_price(product_database):
     url = product_database
-    assert get_detail("P1", database_url=url)["data"]["product"]["price"] == 5000
+    assert asyncio.run(get_detail("P1", database_url=url))["data"]["product"]["price"] == 5000
     set_price(url, "P1", 4500)  # 业务改价后，同一函数再次查询必须拿到新价
-    assert get_detail("P1", database_url=url)["data"]["product"]["price"] == 4500
+    assert asyncio.run(get_detail("P1", database_url=url))["data"]["product"]["price"] == 4500
 
 
 def test_get_detail_missing_product_fails(product_database):
-    result = get_detail("GHOST", database_url=product_database)
+    result = asyncio.run(get_detail("GHOST", database_url=product_database))
     assert not result["success"]
     assert result["error"] == "商品不存在"
 
 
 def test_get_detail_unreachable_database_fails_explicitly():
     # 127.0.0.1:1 本机内核立即拒绝，不依赖网络环境
-    result = get_detail("P1", database_url="postgresql://x:x@127.0.0.1:1/none")
+    result = asyncio.run(get_detail("P1", database_url="postgresql://x:x@127.0.0.1:1/none"))
     assert not result["success"]
     assert "暂时不可用" in result["error"]
 
@@ -84,7 +86,7 @@ def test_get_detail_unreachable_database_fails_explicitly():
 def test_compare_dedupes_and_keeps_input_order(product_database):
     url = product_database
     set_price(url, "P1", 5000)  # 自设确定状态：前面用例可能改过价（同库共用）
-    result = compare_products(["P2", "P1", "P2"], database_url=url)
+    result = asyncio.run(compare_products(["P2", "P1", "P2"], database_url=url))
     assert result["success"]
     data = result["data"]
     # 重复 ID 只比一次，且顺序跟输入走（批量返回的 dict 不决定展示顺序）
@@ -98,13 +100,13 @@ def test_compare_dedupes_and_keeps_input_order(product_database):
 
 
 def test_compare_missing_ids_fail_explicitly(product_database):
-    result = compare_products(["P1", "GHOST", "P3"], database_url=product_database)
+    result = asyncio.run(compare_products(["P1", "GHOST", "P3"], database_url=product_database))
     assert not result["success"]
     assert result["data"]["missing_ids"] == ["GHOST"]  # 不静默少比一款
 
 
 def test_compare_all_dedup_below_two_fails(product_database):
-    result = compare_products(["P1", "P1"], database_url=product_database)
+    result = asyncio.run(compare_products(["P1", "P1"], database_url=product_database))
     assert not result["success"]
 
 

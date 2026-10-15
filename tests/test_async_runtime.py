@@ -34,9 +34,6 @@ def _config() -> RuntimeConfig:
         openai_timeout=settings.openai_timeout,
         openai_max_retries=settings.openai_max_retries,
         llm_max_concurrency=2,
-        database_url=settings.database_url,
-        db_pool_min_size=0,
-        db_pool_max_size=2,
     )
 
 
@@ -63,26 +60,6 @@ def test_open_twice_is_rejected():
         with pytest.raises(RuntimeError):
             await runtime.open()
         await runtime.aclose()
-
-    asyncio.run(main())
-
-
-def test_pool_open_and_close_with_local_pg():
-    from app.db.connection import ping
-    ok, _ = ping(settings.database_url)
-    if not ok:
-        pytest.skip("本地 PG 不可用，跳过连接池验证")
-
-    async def main():
-        runtime = AsyncRuntime(_config())
-        await runtime.open()  # 后台建池
-        try:
-            await runtime.pool.wait(timeout=10.0)  # 等待 min_size 就绪
-            async with runtime.pool.connection() as conn:
-                row = await conn.execute("SELECT 1")
-                assert (await row.fetchone())[0] == 1
-        finally:
-            await runtime.aclose()
 
     asyncio.run(main())
 

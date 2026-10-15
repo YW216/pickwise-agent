@@ -17,7 +17,6 @@ import asyncio
 from dataclasses import dataclass
 
 from langfuse.openai import AsyncOpenAI
-from psycopg_pool import AsyncConnectionPool
 
 from app.config.settings import settings
 
@@ -31,9 +30,6 @@ class RuntimeConfig:
     openai_timeout: float
     openai_max_retries: int
     llm_max_concurrency: int
-    database_url: str
-    db_pool_min_size: int
-    db_pool_max_size: int
 
     @classmethod
     def from_settings(cls) -> "RuntimeConfig":
@@ -43,9 +39,6 @@ class RuntimeConfig:
             openai_timeout=settings.openai_timeout,
             openai_max_retries=settings.openai_max_retries,
             llm_max_concurrency=settings.llm_max_concurrency,
-            database_url=settings.database_url,
-            db_pool_min_size=settings.db_pool_min_size,
-            db_pool_max_size=settings.db_pool_max_size,
         )
 
 
@@ -63,15 +56,18 @@ class AsyncRuntime:
     def __init__(self, config: RuntimeConfig | None = None):
         self._config = config or RuntimeConfig.from_settings()
         self._model_client: AsyncOpenAI | None = None
-        self._pool: AsyncConnectionPool | None = None
         self._llm_slots = asyncio.Semaphore(self._config.llm_max_concurrency)
         self._closed = False
 
     # ---- 生命周期 ----
 
     async def open(self) -> None:
-        """创建模型客户端与 PG 连接池（lifespan 启动时调用一次）。"""
-        if self._model_client is not None or self._pool is not None:
+        """创建模型客户端（lifespan 启动时调用一次）。
+
+        PG 异步池由 ``app.db.connection`` 按需惰性创建（阶段五起），
+        不再挂在本容器上——工具层拿不到 app.state，模块级池是唯一可行归属。
+        """
+        if self._model_client is not None:
             raise RuntimeError("AsyncRuntime 已经打开")
         self._model_client = AsyncOpenAI(
             api_key=self._config.openai_api_key,
@@ -79,24 +75,12 @@ class AsyncRuntime:
             timeout=self._config.openai_timeout,
             max_retries=self._config.openai_max_retries,
         )
-        # open=False + 后台初始化：PG 临时不可达不阻塞应用启动（§4.6），
-        # 依赖状态由 /api/ready 暴露；首次 connection() 时才真正建连
-        self._pool = AsyncConnectionPool(
-            conninfo=self._config.database_url,
-            min_size=self._config.db_pool_min_size,
-            max_size=self._config.db_pool_max_size,
-            open=False,
-        )
-        await self._pool.open()  # wait=False：后台填充连接，失败自动重试
 
     async def aclose(self) -> None:
         """释放资源（lifespan 退出时调用一次；重复调用安全）。"""
         if self._closed:
             return
         self._closed = True
-        if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
         if self._model_client is not None:
             try:
                 await self._model_client.close()
@@ -110,11 +94,6 @@ class AsyncRuntime:
     def model_client(self) -> AsyncOpenAI | None:
         """异步模型客户端；未打开/已关闭时为 None（业务在 open 后才取用）。"""
         return self._model_client
-
-    @property
-    def pool(self) -> AsyncConnectionPool | None:
-        """异步 PG 连接池；未打开/已关闭时为 None。"""
-        return self._pool
 
     @property
     def llm_concurrency(self) -> int:

@@ -60,7 +60,7 @@ def brief_view(product: dict) -> dict:
 
 
 
-def search_catalog(
+async def search_catalog(
     query: str | None = None,
     brand: str | None = None,
     category: str | None = None,
@@ -95,7 +95,7 @@ def search_catalog(
     try:
         from app.db.catalog_repo import search_candidates, search_nearest
 
-        res = search_candidates(url, query, brand,
+        res = await search_candidates(url, query, brand,
                                 category, budget_min, budget_max, limit)
         if res["total"]:
             returned, matched = res["total"], res.get("matched", res["total"])
@@ -104,7 +104,7 @@ def search_catalog(
                 if matched > returned else _CARDS_HINT
             )
             return ok({**res, "hint": hint})
-        near = search_nearest(url, query, brand,
+        near = await search_nearest(url, query, brand,
                               category, budget_min, budget_max, 3)
         if near["candidates"]:
             return fail(

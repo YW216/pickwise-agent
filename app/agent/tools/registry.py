@@ -32,6 +32,7 @@ schema 编写约定：
    比每条 schema 挂着 additionalProperties: false 更省每轮重发的 token。
 """
 
+import asyncio
 import json
 from functools import partial
 from typing import Callable
@@ -362,15 +363,14 @@ def _signature(name: str, arguments: dict) -> str:
     return f"{name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"
 
 
-def execute_tool(
+def _prepare_call(
     name: str, arguments: dict, seen: dict[str, int] | None = None,
     *, handlers: dict[str, Callable[..., dict]] | None = None,
-) -> dict:
-    """根据工具名称分发执行，返回统一信封 dict（执行层的唯一收口）。
+):
+    """执行前的全部同步闸门：查工具 → 校验 → 熔断。
 
-    参数不合契约直接拒绝执行，返回可操作原因（模型改值重调）；
-    同一签名本轮内超过 MAX_SAME_CALLS 次则熔断（`seen` 为 None 时不熔断）；
-    漏网异常在此兜底；参数被归一化或夹紧时给信封追加 notice。
+    返回 (func, arguments, notes) 表示可以执行；返回 dict 表示失败信封
+    （直接作为结果返回，不执行）。纯内存操作，同步/异步执行路径共用。
     """
     func = (_TOOL_MAP if handlers is None else handlers).get(name)
     if not func:
@@ -400,15 +400,66 @@ def execute_tool(
             )
         seen[signature] = seen.get(signature, 0) + 1
 
+    return func, arguments, notes
+
+
+def _merge_notes(result: dict, notes: list[str]) -> dict:
+    if notes:
+        return {**result, "notice": "；".join(notes)}
+    return result
+
+
+def execute_tool(
+    name: str, arguments: dict, seen: dict[str, int] | None = None,
+    *, handlers: dict[str, Callable[..., dict]] | None = None,
+) -> dict:
+    """根据工具名称分发执行，返回统一信封 dict（同步执行层的唯一收口）。
+
+    参数不合契约直接拒绝执行，返回可操作原因（模型改值重调）；
+    同一签名本轮内超过 MAX_SAME_CALLS 次则熔断（`seen` 为 None 时不熔断）；
+    漏网异常在此兜底；参数被归一化或夹紧时给信封追加 notice。
+    """
+    prepared = _prepare_call(name, arguments, seen, handlers=handlers)
+    if isinstance(prepared, dict):
+        return prepared
+    func, arguments, notes = prepared
+
     try:
         result = func(**arguments)
+        if asyncio.iscoroutine(result):
+            # 同步入口遇到 async 工具：同步上下文的正确语义是跑完再返回
+            result = asyncio.run(result)
     except Exception as e:
         print(f"[工具异常] {name}: {e}")
         return fail(f"工具执行出错: {e}")
 
-    if notes:
-        result = {**result, "notice": "；".join(notes)}
-    return result
+    return _merge_notes(result, notes)
+
+
+async def aexecute_tool(
+    name: str, arguments: dict, seen: dict[str, int] | None = None,
+    *, handlers: dict[str, Callable[..., dict]] | None = None,
+) -> dict:
+    """异步执行层收口（阶段三）：与 execute_tool 共用同一套同步闸门。
+
+    工具函数为协程 → 直接 await（新工具可原生 async）；
+    同步工具 → to_thread 执行（等待期间不阻塞事件循环）。
+    """
+    prepared = _prepare_call(name, arguments, seen, handlers=handlers)
+    if isinstance(prepared, dict):
+        return prepared
+    func, arguments, notes = prepared
+
+    try:
+        if asyncio.iscoroutinefunction(func):
+            result = await func(**arguments)
+        else:
+            result = await asyncio.to_thread(func, **arguments)
+    except Exception as e:
+        print(f"[工具异常] {name}: {e}")
+        return fail(f"工具执行出错: {e}")
+
+    return _merge_notes(result, notes)
 
 
 def to_tool_message_content(result: dict) -> str:
