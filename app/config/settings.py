@@ -105,8 +105,8 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = False
     # 允许的前端 Origin（CORS 与 CSRF 校验共用）；空列表 = 仅同源访问。
     allowed_origins: list[str] = []
-    # 商品/收藏接口的有界线程执行器规模；四个名额都在用时报 PRODUCT_SERVICE_BUSY。
-    product_executor_workers: int = Field(default=4, gt=0)
+    # 聊天幂等记录保留时间；超过窗口后允许同一键重新开始一次请求。
+    idempotency_ttl_seconds: int = Field(default=86400, gt=0)
 
     # ---------- 异步基础层（异步改造阶段一） ----------
     # LLM 并发闸门：同时在飞的模型调用上限（asyncio.Semaphore）。

@@ -1,0 +1,88 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #17221f;
+  background: #f3f6f3;
+  font-synthesis: none;
+  --ink: #17221f;
+  --muted: #68746f;
+  --line: #dbe4df;
+  --paper: #ffffff;
+  --mint: #d9f1e6;
+  --green: #126b4e;
+  --green-dark: #0d4e3a;
+  --coral: #c45b43;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; background: #f3f6f3; }
+button, textarea, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: wait; opacity: .6; }
+
+.app-shell { width: min(1320px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 36px; }
+.topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 8px 4px 24px; }
+.eyebrow { margin: 0 0 8px; color: var(--green); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+h1, h2, h3, p { margin-top: 0; }
+h1 { margin-bottom: 0; font-size: clamp(28px, 4vw, 46px); line-height: 1; letter-spacing: -.03em; }
+h2 { margin-bottom: 0; font-size: 22px; letter-spacing: -.02em; }
+.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.status-pill { padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #eef2ef; font-size: 12px; font-weight: 700; }
+.status-ready { border-color: #bfe0d0; color: var(--green); background: var(--mint); }
+.status-busy { border-color: #e5d4a8; color: #8a6518; background: #fbf2d9; }
+.status-error { border-color: #ecc8c0; color: var(--coral); background: #fff0ed; }
+.button { min-height: 40px; border: 0; border-radius: 8px; padding: 0 15px; font-weight: 750; transition: transform .16s ease, background .16s ease; }
+.button:hover:not(:disabled) { transform: translateY(-1px); }
+.button-primary { color: #fff; background: var(--green); }
+.button-primary:hover:not(:disabled) { background: var(--green-dark); }
+.button-secondary { color: var(--green-dark); border: 1px solid #bdd5c9; background: #f8fbf9; }
+
+.workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .8fr); gap: 18px; align-items: stretch; }
+.chat-panel, .catalog-panel { min-height: 680px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: 0 12px 30px rgba(33, 60, 48, .06); }
+.chat-panel { display: flex; flex-direction: column; overflow: hidden; }
+.messages { flex: 1; min-height: 0; overflow: auto; padding: 28px; }
+.message { max-width: 80%; margin-bottom: 18px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); }
+.message p { margin: 5px 0 0; line-height: 1.65; white-space: pre-wrap; }
+.message-user { margin-left: auto; border-color: #b9decd; background: var(--mint); }
+.message-assistant { background: #fafcfb; }
+.message-label, .message-meta { display: block; font-size: 11px; font-weight: 800; color: var(--green); }
+.message-meta { margin-top: 10px; color: var(--muted); font-weight: 600; }
+.composer { border-top: 1px solid var(--line); padding: 18px 22px 20px; background: #fbfdfc; }
+.composer textarea, .product-form input { width: 100%; border: 1px solid #cbd9d2; border-radius: 8px; outline: none; color: var(--ink); background: #fff; }
+.composer textarea { min-height: 84px; resize: vertical; padding: 12px 13px; line-height: 1.5; }
+.composer textarea:focus, .product-form input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(18, 107, 78, .1); }
+.composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.hint, .panel-copy { color: var(--muted); font-size: 12px; }
+.inline-error { margin: 0 22px 14px; padding: 10px 12px; border-radius: 7px; color: #963c2d; background: #fff0ed; font-size: 13px; }
+.catalog-panel { min-height: 0; padding: 24px; }
+.panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.panel-mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 8px; color: var(--green); background: var(--mint); font-size: 24px; }
+.panel-copy { margin: 14px 0 20px; line-height: 1.6; }
+.product-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.product-form input { height: 40px; padding: 0 12px; }
+.product-results { display: grid; gap: 10px; margin-top: 20px; }
+.product-card { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdfc; }
+.product-card-top { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
+.product-category { color: var(--green); font-weight: 800; }
+.product-card h3 { margin: 10px 0 6px; font-size: 16px; }
+.product-card p { margin-bottom: 12px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.product-price { color: var(--coral); font-weight: 800; }
+.empty-state { padding: 22px 8px; color: var(--muted); font-size: 13px; text-align: center; }
+.error-state { color: var(--coral); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 860px) {
+  .app-shell { width: min(100% - 24px, 680px); padding-top: 16px; }
+  .topbar { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .topbar-actions { width: 100%; justify-content: space-between; }
+  .workspace { grid-template-columns: 1fr; }
+  .chat-panel { min-height: 620px; }
+}
+
+@media (max-width: 480px) {
+  .messages { padding: 18px 14px; }
+  .message { max-width: 92%; }
+  .composer { padding: 14px; }
+  .composer-footer { align-items: flex-end; flex-direction: column; }
+  .composer-footer .button { width: 100%; }
+  .catalog-panel { padding: 18px; }
+}

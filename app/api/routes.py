@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
+import json
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.agent.tools.catalog import search_catalog
@@ -22,7 +23,6 @@ from app.api.auth import (
 )
 from app.api.deps import get_auth, get_current_user, get_session_manager, require_csrf
 from app.api.envelope import (
-    ProductBusy,
     clear_auth_cookie,
     error,
     new_request_id,
@@ -32,6 +32,7 @@ from app.api.envelope import (
 from app.api.schemas import ChatRequest, CompareRequest, SessionCreateRequest
 from app.config.settings import settings
 from app.identity import SessionIdentity
+from app.services.idempotency import hash_request, validate_idempotency_key
 from app.services.session_manager import (
     ChatOutcome,
     SessionManager,
@@ -117,15 +118,91 @@ async def chat(
     request: Request,
     user: AnonymousIdentity = Depends(require_csrf),
     manager: SessionManager = Depends(get_session_manager),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    """聊天：投递到窗口 FIFO 队列，等待结果快照并按失败语义映射状态码。"""
+    """聊天：支持 Idempotency-Key，防止客户端重试重复执行 Agent。"""
     request_id = new_request_id()
     identity = _identity_for(user, body.session_id)
+
+    request_hash = None
+    if idempotency_key is not None:
+        try:
+            idempotency_key = validate_idempotency_key(idempotency_key)
+        except ValueError as exc:
+            return error(422, "IDEMPOTENCY_KEY_INVALID", str(exc), request_id)
+        request_hash = hash_request(
+            {"session_id": identity.session_id, "message": body.message}
+        )
+        try:
+            claim = await request.app.state.idempotency_store.begin(
+                identity.user_id,
+                identity.session_id,
+                idempotency_key,
+                request_hash,
+                ttl_seconds=settings.idempotency_ttl_seconds,
+            )
+        except Exception:
+            return error(
+                503,
+                "IDEMPOTENCY_UNAVAILABLE",
+                "请求去重服务暂时不可用",
+                request_id,
+            )
+        if claim.action == "conflict":
+            return error(
+                409,
+                "IDEMPOTENCY_KEY_REUSED",
+                "同一个 Idempotency-Key 不能用于不同请求",
+                request_id,
+            )
+        if claim.action == "in_progress":
+            response = error(
+                409,
+                "REQUEST_IN_PROGRESS",
+                "相同请求正在处理中，请稍后重试",
+                request_id,
+            )
+            response.headers["Retry-After"] = "1"
+            return response
+        if claim.action == "replay":
+            response = JSONResponse(
+                status_code=claim.status_code or 200,
+                content=claim.response or {},
+            )
+            response.headers["X-Idempotent-Replay"] = "true"
+            return response
+
     try:
         outcome = await manager.chat(identity, body.message)
     except SessionManagerError as exc:
-        return session_error(exc, request_id)
-    return _chat_response(identity, outcome, request_id)
+        response = session_error(exc, request_id)
+    except Exception:
+        response = error(
+            500,
+            "CHAT_INTERNAL_ERROR",
+            "服务内部错误，请稍后重试",
+            request_id,
+        )
+    else:
+        response = _chat_response(identity, outcome, request_id)
+
+    if idempotency_key is not None and request_hash is not None:
+        try:
+            payload = json.loads(response.body.decode("utf-8"))
+            await request.app.state.idempotency_store.finish(
+                identity.user_id,
+                identity.session_id,
+                idempotency_key,
+                request_hash,
+                status="succeeded" if response.status_code < 400 else "failed",
+                status_code=response.status_code,
+                response=payload,
+            )
+        except Exception:
+            # Agent 已经执行完成，不能因为幂等账本写失败而再次执行；
+            # 对客户端保留本次结果，并明确标注账本未写入。
+            response.headers["X-Idempotency-Persisted"] = "false"
+    return response
 
 
 def _identity_for(user: AnonymousIdentity, session_id: str) -> SessionIdentity:
@@ -160,22 +237,7 @@ def _chat_response(identity: SessionIdentity, outcome: ChatOutcome,
     return success(data, request_id)
 
 
-# ---------- 商品与收藏（公共目录；有界执行器执行同步工具） ----------
-
-async def _run_product(request: Request, fn, *args):
-    """商品/收藏接口的有界执行：名额满即拒绝（PRODUCT_SERVICE_BUSY），不排队。"""
-    return await request.app.state.product_runner.run(fn, *args)
-
-
-async def _guarded_product(request: Request, fn, *args):
-    """执行并把「执行名额满」翻译成 unavailable 标志的失败信封（§4.5）。"""
-    try:
-        return await _run_product(request, fn, *args)
-    except ProductBusy:
-        return {"success": False,
-                "error": "商品查询过于繁忙，请稍后再试",
-                "data": {"unavailable": True}}
-
+# ---------- 商品与收藏（公共目录；async 工具直调，PG 异步池自带连接上限） ----------
 
 @products_router.get("/search")
 async def search_products_route(
@@ -200,11 +262,11 @@ async def search_products_route(
         if brand:
             return error(422, "BRAND_NOT_SUPPORTED",
                          "语义搜索不支持品牌参数，请改用 mode=catalog", request_id)
-        result = await _guarded_product(request, search_products, query, category,
-                                    min_price, max_price, limit)
+        result = await search_products(query, category,
+                                   min_price, max_price, limit)
     else:
-        result = await _guarded_product(request, search_catalog, query, brand,
-                                    category, min_price, max_price, limit)
+        result = await search_catalog(query, brand,
+                                  category, min_price, max_price, limit)
     return _product_response(result, request_id)
 
 
@@ -218,7 +280,7 @@ async def product_detail(
     request_id = new_request_id()
     if not product_id or "/" in product_id or "\\" in product_id:
         return error(422, "PRODUCT_ID_INVALID", "商品编号不合法", request_id)
-    result = await _guarded_product(request, get_detail, product_id)
+    result = await get_detail(product_id)
     return _detail_response(result, request_id)
 
 
@@ -230,7 +292,7 @@ async def compare_products_route(
 ):
     """一次对比 2~4 个不同商品；缺失 ID 明确失败（422）。"""
     request_id = new_request_id()
-    result = await _guarded_product(request, compare_products, body.product_ids)
+    result = await compare_products(body.product_ids)
     if not result["success"]:
         data = result.get("data", {})
         if data.get("unavailable"):
@@ -274,8 +336,7 @@ async def list_favorites(
 ):
     """当前用户收藏；空列表是正常的 200 响应。"""
     request_id = new_request_id()
-    result = await _guarded_product(
-        request, get_user_favorites,
+    result = await get_user_favorites(
         user_id=user.user_id, category=category, limit=limit,
         database_url=settings.database_url,
     )

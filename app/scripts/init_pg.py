@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 from app.db.catalog_repo import init_schema_and_seed, load_full_catalog  # noqa: E402
 from app.db.connection import ping  # noqa: E402
 from app.db.user_repo import init_user_schema  # noqa: E402
+from app.services.idempotency import ensure_schema as ensure_chat_idempotency_schema  # noqa: E402
 from app.config.settings import settings  # noqa: E402
 
 SEED_PATH = ROOT / "app" / "db" / "seed" / "products.json"
@@ -63,6 +64,8 @@ def main():
         url, {"products": seed["products"], "favorites": seed["favorites"]}
     )
     imported = init_user_schema(url, legacy_user_id=settings.memory_user_id)
+    ensure_chat_idempotency_schema(url)
+    print("聊天幂等表已就绪")
     print(f"用户收藏表已就绪，本次导入原 CLI 收藏 {imported} 条")
     # init_schema_and_seed 只在表为空时播种，「是否跳过」看它回读的 existing_products
     if counts["existing_products"]:

@@ -16,17 +16,19 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Windows 上 psycopg 异步模式要求 Selector 事件循环（Proactor 不支持
-# add_reader）；import 本模块即生效，任何启动方式都覆盖。uvicorn 在
-# Windows + asyncio 下也会做同样设置，此处是双保险。
+# add_reader）。策略只对"设置之后新建"的循环生效，而 uvicorn 先建循环
+# 再 import 本模块，所以对生产启动此处的设置为时已晚——真正的保障在
+# 进程入口 run.py（先设策略再 uvicorn.run）。此处保留同款设置，仅覆盖
+# 测试、脚本等自行建循环的入口。
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from app.api import routes
 from app.api.auth import AnonymousAuth
 from app.api.envelope import (
-    ProductBusy,
     MAX_BODY_BYTES,
     error,
     new_request_id,
@@ -34,27 +36,8 @@ from app.api.envelope import (
 from app.config.settings import settings
 from app.multi_agent.orchestrator import MultiAgentOrchestrator
 from app.services.async_runtime import AsyncRuntime
+from app.services.idempotency import PostgresIdempotencyStore
 from app.services.session_manager import SessionManager
-
-
-class ProductRunner:
-    """商品/收藏接口的有界执行器：名额满立即拒绝，不排队（§4.1）。"""
-
-    def __init__(self, max_workers: int):
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="product-worker",
-        )
-        self._slots = asyncio.Semaphore(max_workers)
-
-    async def run(self, fn, *args):
-        if self._slots.locked():  # 四个名额都在使用：直接 503，不增加等待队列
-            raise ProductBusy()
-        async with self._slots:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(self._executor, fn, *args)
-
-    def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=True)
 
 
 class DependencyProbe:
@@ -163,11 +146,14 @@ class BodySizeLimitMiddleware:
 
 def create_app(*, auth_secret_key: str | None = None,
                session_dir: str | Path | None = None,
-               factory=None) -> FastAPI:
+               factory=None,
+               idempotency_store=None) -> FastAPI:
     """创建 FastAPI 应用；三个注入参数仅供测试，生产读配置。
 
     factory：identity → 运行对象。默认构造真实 MultiAgentOrchestrator；
-    测试必须注入假 factory，绝不让单元测试打到真实模型。
+        测试必须注入假 factory，绝不让单元测试打到真实模型。
+    idempotency_store：聊天幂等存储。生产默认使用 PostgreSQL，测试可注入
+        InMemoryIdempotencyStore，避免测试依赖外部数据库。
     """
     injected = auth_secret_key is not None
     secret = auth_secret_key if injected else settings.auth_secret_key
@@ -192,7 +178,10 @@ def create_app(*, auth_secret_key: str | None = None,
             session_dir=Path(session_dir or settings.web_session_dir),
             factory=orchestrator_factory,
         )
-        app.state.product_runner = ProductRunner(settings.product_executor_workers)
+        app.state.idempotency_store = (
+            idempotency_store
+            or PostgresIdempotencyStore(settings.database_url)
+        )
         app.state.dependency_probe = DependencyProbe()
         await app.state.session_manager.start_cleanup_loop()
         try:
@@ -203,7 +192,6 @@ def create_app(*, auth_secret_key: str | None = None,
             await app.state.async_runtime.aclose()
             from app.db.connection import close_all_pools
             await close_all_pools()
-            app.state.product_runner.shutdown()
             from app.agent.tools.search_products import close_public_clients
             close_public_clients()
 
@@ -222,6 +210,10 @@ def create_app(*, auth_secret_key: str | None = None,
     app.include_router(routes.products_router)
     app.include_router(routes.favorites_router)
     app.include_router(routes.health_router)
+    frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+    if frontend_dir.is_dir():
+        # API 路由已先注册，根挂载只负责静态页面和资源。
+        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     return app
 
 

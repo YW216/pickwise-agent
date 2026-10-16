@@ -27,10 +27,6 @@ from app.services.session_manager import (
 MAX_BODY_BYTES = 64 * 1024  # 请求体大小上限（初值 64 KiB，按实际字节校验）
 
 
-class ProductBusy(Exception):
-    """商品执行名额满（HTTP 层映射 503 PRODUCT_SERVICE_BUSY）。"""
-
-
 # SessionManager 异常 → (HTTP 状态码, 稳定错误码)
 _SESSION_ERROR_MAP: list[tuple[type[Exception], int, str]] = [
     (SessionNotFound, 404, "SESSION_NOT_FOUND"),
