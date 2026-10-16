@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # 商品语义检索库（search_products）：与知识库分 collection——语义域不同
     # （知识问答 vs 商品卡片），更新节奏也不同（指南低频 / 商品信息随目录变）
     product_collection: str = "product_kb"
+    # Reranker（cross-encoder 精排）：凭证回退链复用 embedding 的硅基流动配置
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_api_key: str = ""
+    rerank_base_url: str = ""
 
     # Memory 配置（第7期）
     memory_enabled: bool = True
@@ -71,6 +75,8 @@ class Settings(BaseSettings):
     # 真值层数据库（PostgreSQL）：商品目录 / 评价 / 保修的唯一事实源，
     # Milvus 检索索引由它构建。空串 = 未落库，回退本地文件（mock_data + extra JSON）
     database_url: str = "postgresql://pickwise:pickwise@localhost:15432/pickwise"
+    worker_interval_seconds: int = Field(default=300, gt=0)
+    worker_retry_seconds: int = Field(default=60, gt=0)
 
     # Skill 配置（第8期；2026-09-03 PickWise 化：product-recommend 归 guide，
     # catalog 按 Agent 归属过滤——客服 process-return/track-order 留库不暴露）
@@ -105,7 +111,6 @@ class Settings(BaseSettings):
     # ---------- 异步基础层（异步改造阶段一） ----------
     # LLM 并发闸门：同时在飞的模型调用上限（asyncio.Semaphore）。
     # 线程池删除后它接管「限并发」职责；超出的协程排队等待，不占线程。
-    llm_max_concurrency: int = Field(default=8, gt=0)
     # 异步 PG 连接池规模（阶段五切换数据访问时使用；阶段一仅建池不切流量）。
     db_pool_min_size: int = Field(default=2, ge=0)
     db_pool_max_size: int = Field(default=10, gt=0)
@@ -166,6 +171,14 @@ class Settings(BaseSettings):
     # 所以「主模型配了DeepSeek」时回退出的 base_url 指向一个没有 embedding
     # 端点的host —— 此时若仍沿用默认的 BAAI/bge-m3，请求会以404/模型不存在告终。
     # 配了 EMBEDDING_BASE_URL 就意味着换了 provider，模型名必须跟着换。
+    @property
+    def effective_rerank_api_key(self) -> str:
+        return self.rerank_api_key or self.effective_embedding_api_key
+
+    @property
+    def effective_rerank_base_url(self) -> str:
+        return self.rerank_base_url or self.effective_embedding_base_url
+
     @property
     def effective_embedding_api_key(self) -> str:
         return self.embedding_api_key or self.openai_api_key

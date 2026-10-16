@@ -176,13 +176,11 @@ def create_app(*, auth_secret_key: str | None = None,
     if len(secret.encode()) < 32:
         raise RuntimeError("AUTH_SECRET_KEY 过弱：至少 32 字节高强度随机材料")
     orchestrator_factory = factory or (
-        # 共享 runtime 的模型 client 与 LLM 闸门（阶段二/六澄清）：
-        # 所有窗口的 orchestrator 复用同一个 AsyncOpenAI（连接池共享），
-        # 闸门统一限流全进程在飞模型调用；orchestrator 内部负责 Gated 包装
+        # 所有窗口的 orchestrator 复用共享 AsyncOpenAI（连接池共享）；
+        # 模型并发限流已移除（阶段八裁定，自用场景无对手方）
         lambda identity: MultiAgentOrchestrator(
             identity=identity,
-            client=app.state.async_runtime.model_client,
-            llm_gate=app.state.async_runtime.llm_gate))
+            client=app.state.async_runtime.model_client))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

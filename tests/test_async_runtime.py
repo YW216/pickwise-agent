@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.config.settings import settings
-from app.services.async_runtime import AsyncRuntime, RuntimeConfig, run_sync
+from app.services.async_runtime import AsyncRuntime, RuntimeConfig
 from tests.test_session_manager import FactoryRecorder
 
 SECRET = "async-runtime-secret-0123456789abcdef"  # 40 字节
@@ -33,7 +33,6 @@ def _config() -> RuntimeConfig:
         openai_base_url=settings.openai_base_url,
         openai_timeout=settings.openai_timeout,
         openai_max_retries=settings.openai_max_retries,
-        llm_max_concurrency=2,
     )
 
 
@@ -60,36 +59,6 @@ def test_open_twice_is_rejected():
         with pytest.raises(RuntimeError):
             await runtime.open()
         await runtime.aclose()
-
-    asyncio.run(main())
-
-
-def test_llm_semaphore_limits_inflight_calls():
-    async def main():
-        runtime = AsyncRuntime(_config())  # llm_max_concurrency=2
-        inflight = 0
-        peak = 0
-
-        async def fake_model_call():
-            nonlocal inflight, peak
-            async with runtime.acquire_llm_slot():
-                inflight += 1
-                peak = max(peak, inflight)
-                await asyncio.sleep(0.02)  # 模拟模型等待
-                inflight -= 1
-
-        await asyncio.gather(*(fake_model_call() for _ in range(6)))
-        assert peak == 2  # 6 个并发调用，同时在飞最多 2
-
-    asyncio.run(main())
-
-
-def test_run_sync_wraps_blocking_call():
-    async def main():
-        def blocking(a, b, *, c=0):
-            return a + b + c
-
-        assert await run_sync(blocking, 1, 2, c=3) == 6
 
     asyncio.run(main())
 

@@ -144,6 +144,7 @@ async def search_products(
     max_price: int | None = None,
     limit: int = 5,
     database_url: str | None = None,
+    rerank: bool = False,
 ) -> dict:
     """自然语言语义搜索商品：介绍卡片的 dense + BM25 双路召回，RRF 融合。
 
@@ -215,7 +216,7 @@ async def search_products(
         # 不读进程内快照 PRODUCTS：快照仅在进程启动时加载，PG 改价后即过期；
         # 按命中 id 批量直查（一次 SQL 只取命中几条），价格/名称永远是真值。
         products_by_id = await aget_products_by_ids(url, ids)
-        results = []
+        candidates = []  # 复核通过的有效候选（按召回序）
         for pid in ids:  # 按 Milvus 检索排序输出，不跟 dict 迭代序
             product = products_by_id.get(pid)
             if not product:
@@ -228,9 +229,27 @@ async def search_products(
                 continue
             if max_price is not None and product["price"] > max_price:
                 continue
-            results.append(brief_view(product))
-            if len(results) >= limit:
-                break
+            candidates.append(brief_view(product))
+
+        if rerank and candidates:
+            # cross-encoder 精排（阶段六后续）：把 query 与候选卡片文本配对
+            # 打分重排，压掉 RRF 无法分辨的关键词噪声 → Prec/MRR 提升
+            from app.agent.rag.reranker import Reranker
+            from app.config.settings import settings
+            reranker = Reranker(
+                api_key=settings.effective_rerank_api_key,
+                base_url=settings.effective_rerank_base_url,
+                model=settings.rerank_model,
+            )
+            docs = [
+                f"{c['name']} {c['brand']} {c['category']} "
+                f"{c['price']}元 {c['summary']}"
+                for c in candidates
+            ]
+            order = await asyncio.to_thread(reranker.rerank, query, docs, limit)
+            results = [candidates[i] for i in order]
+        else:
+            results = candidates
     except ConnectionError as exc:
         return fail(str(exc), {"results": [], "total": 0, "unavailable": True})
     except Exception as exc:  # noqa: BLE001

@@ -35,7 +35,7 @@ def create_orchestrator(tmp_path):
             identity=owner, web_session_dir=str(tmp_path / "web"), client=client,
             skills_enabled=False, mcp_enabled=False, **options,
         )
-        instance._mock_client = client  # GatedAsyncClient 包装后从这里设置副作用
+        instance._mock_client = client  # 保存 mock client 引用，测试从这里设置副作用
         instance.compaction_enabled = False
         created.append(instance)
         return instance

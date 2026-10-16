@@ -1,4 +1,12 @@
-"""RAG 检索评测：Hit@K / MRR / Recall@K / Precision@K 三方基线对照。
+"""RAG 检索评测：Hit@K / MRR / Recall@K / Precision@K（hybrid 调参模式）。
+
+参数化口径：
+  --top-k K      最终输出量（给模型的条数）
+  --recall-k N   召回窗口（dense/BM25 每路各取 N，RRF 融合后取前 N）
+  --with-dense   附带 dense 对照组（默认只跑 hybrid）
+
+三方历史对照（dense / hybrid-narrow / hybrid-wide）见 git 历史；当前版本
+面向 (top_k, recall_k) 网格调参，报告文件名自带参数标识。
 
 数据：app/evaluation/rag_cases.json（review_status=approved，防幻觉流程产出）；
 负例无 ground truth，不进指标（单独计数）。
@@ -9,18 +17,14 @@
   Precision@3 = top3 中来自期望文档的比例（上下文噪声代理）
 - 商品类：product_id 定 Hit@K / MRR / Precision@K（单商品标注，Precision=hit/K，解释受限）
 
-三方对照：
-  dense          —— MilvusBackend.search（纯 dense 对照组）
-  hybrid-narrow  —— hybrid，recall_k = top_k（旧行为：召回窗口=输出量）
-  hybrid-wide    —— hybrid，recall_k = 20（当前生产默认：漏斗召回）
-
 评测与生产共用检索路径（知识走 MilvusBackend，商品走 search_products 的
 _hybrid_product_ids），保证测的就是线上行为。
 
 用法：
-  python app/scripts/run_rag_eval.py                # 三方全跑，top_k=5（生产口径）
-  python app/scripts/run_rag_eval.py --top-k 3     # 严格口径
-  python app/scripts/run_rag_eval.py --limit 10     # 冒烟：只跑前 10 条 approved
+  python app/scripts/run_rag_eval.py                          # 生产口径 top_k=5, recall_k=50
+  python app/scripts/run_rag_eval.py --top-k 3 --recall-k 20  # 网格调参
+  python app/scripts/run_rag_eval.py --limit 10               # 冒烟：只跑前 10 条 approved
+  python app/scripts/run_rag_eval.py --with-dense             # 附带 dense 对照
 
 产出：终端对照表 + app/evaluation/runs/rag_report.json（三模式指标与未命中清单，
 供 run-to-run 对比；--no-save 可关闭）；未命中清单也逐模式打印，便于定位语料缺口。
@@ -83,7 +87,18 @@ def main():
     parser = argparse.ArgumentParser(description="RAG 检索评测（三方基线对照）")
     parser.add_argument("--top-k", type=int, default=TOP_K)
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条 approved（冒烟）")
-    parser.add_argument("--wide-recall", type=int, default=20, help="hybrid-wide 的召回窗口")
+    parser.add_argument(
+        "--recall-k", type=int, default=50,
+        help="hybrid 召回窗口 N：dense/BM25 每路各取 N，RRF 融合后取前 N",
+    )
+    parser.add_argument(
+        "--with-dense", action="store_true",
+        help="附带 dense 对照组（默认只跑 hybrid，调参用）",
+    )
+    parser.add_argument(
+        "--with-rerank", action="store_true",
+        help="检索后加 cross-encoder 精排（bge-reranker-v2-m3，验 Prec/MRR 收益）",
+    )
     parser.add_argument(
         "--cases", default="app/evaluation/rag_cases.json", help="评测集路径"
     )
@@ -96,6 +111,37 @@ def main():
         help="不落盘 runs/rag_report.json（默认落盘，供 run-to-run 对比）",
     )
     args = parser.parse_args()
+
+    reranker = None
+    if args.with_rerank:
+        from app.agent.rag.reranker import Reranker
+        reranker = Reranker(
+            api_key=settings.effective_rerank_api_key,
+            base_url=settings.effective_rerank_base_url,
+            model=settings.rerank_model,
+        )
+
+    def _rerank_by_text(query, ids):
+        """按 id 回查真值文本 → cross-encoder 重排 → 返回重排后的 id 列表。
+
+        评测为同步上下文：PG 用同步壳（与 search_products 同步时代同款），
+        rerank API 本身是同步 HTTP——无事件循环，无需 to_thread。
+        """
+        from app.db.catalog_repo import get_products_by_ids
+        products = get_products_by_ids(settings.database_url, ids)
+        docs, valid_ids = [], []
+        for pid in ids:
+            product = products.get(pid)
+            if product:
+                valid_ids.append(pid)
+                docs.append(
+                    f"{product['name']} {product['brand']} {product['category']} "
+                    f"{product['price']}元"
+                )
+        if not valid_ids:
+            return ids
+        order = reranker.rerank(query, docs, top_n=len(docs))
+        return [valid_ids[i] for i in order]
 
     uri = _resolve_uri()
     ensure_reachable(uri)
@@ -141,13 +187,18 @@ def main():
     k_vectors = embedder.encode([c["query"] for c in knowledge_cases])
     p_vectors = embedder.encode([c["query"] for c in product_cases])
 
-    MODES = ["dense", "hybrid-narrow", "hybrid-wide"]
+    MODES = ["hybrid"] + (["dense"] if args.with_dense else [])
 
     def _retrieve_knowledge(mode, text, vec):
         if mode == "dense":
             return kb_backend.search(vec, top_k=args.top_k)
-        rk = args.top_k if mode == "hybrid-narrow" else args.wide_recall
-        return kb_backend.hybrid_search(text, vec, top_k=args.top_k, recall_k=rk)
+        hits = kb_backend.hybrid_search(
+            text, vec, top_k=args.top_k, recall_k=args.recall_k)
+        if reranker is not None:
+            order = reranker.rerank(
+                text, [h.chunk.text for h in hits], top_n=len(hits))
+            hits = [hits[i] for i in order]
+        return hits
 
     def _retrieve_product(mode, text, vec, case):
         # 对齐生产（P2-3）：硬条件按 PG 当前真值先算 ID 集合，再下推
@@ -173,8 +224,9 @@ def main():
                 output_fields=["product_id"],
             )[0]
             return [h["entity"].get("product_id", h.get("id", "")) for h in hits]
-        rk = args.top_k if mode == "hybrid-narrow" else args.wide_recall
-        return _hybrid_product_ids(text, vec, top_k=args.top_k, recall_k=rk, expr=expr)
+        ids = _hybrid_product_ids(
+            text, vec, top_k=args.top_k, recall_k=args.recall_k, expr=expr)
+        return _rerank_by_text(text, ids) if reranker is not None else ids
 
     # ---------- 三方 × 两类逐 case 评测 ----------
     stats: dict[str, dict[str, list]] = {}
@@ -261,7 +313,9 @@ def main():
         summary = {
             "run_at": datetime.now().isoformat(timespec="seconds"),
             "top_k": args.top_k,
-            "wide_recall": args.wide_recall,
+            "recall_k": args.recall_k,
+            "with_dense": args.with_dense,
+            "with_rerank": args.with_rerank,
             "included": {
                 "knowledge": len(knowledge_cases),
                 "product": len(product_cases),
@@ -288,17 +342,22 @@ def main():
                 for mode in MODES
             },
         }
-        # 归一化文件名的模式键（hybrid-narrow → hybrid_narrow），便于 jq 取值
         for mode in MODES:
             out = RUNS_DIR / f"rag_{mode.replace('-', '_')}.json"
             out.write_text(
                 json.dumps({**summary, "mode": mode}, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-        (RUNS_DIR / "rag_report.json").write_text(
+        tag = f"top{args.top_k}_recall{args.recall_k}" + (
+            "_with_dense" if args.with_dense else ""
+        ) + ("_rerank" if args.with_rerank else "")
+        (RUNS_DIR / f"rag_report_{tag}.json").write_text(
             json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        print(f"\n结果已落盘: {RUNS_DIR / 'rag_report.json'}（含三模式指标与未命中清单）")
+        print(
+            f"\n结果已落盘: {RUNS_DIR / f'rag_report_{tag}.json'}"
+            f"（参数 top_k={args.top_k}, recall_k={args.recall_k}）"
+        )
 
 
 if __name__ == "__main__":

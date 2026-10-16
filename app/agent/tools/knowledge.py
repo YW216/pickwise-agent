@@ -47,7 +47,7 @@ def reset_retriever() -> None:
     _retriever = None
 
 
-async def retrieve_knowledge(query: str, top_k: int = 3) -> dict:
+async def retrieve_knowledge(query: str, top_k: int = 3, *, rerank: bool = False) -> dict:
     """检索平台知识库（选购指南、参数科普、售后政策、FAQ、配送、会员权益）。
 
     Args:
@@ -84,6 +84,19 @@ async def retrieve_knowledge(query: str, top_k: int = 3) -> dict:
     # 注意 score 量纲变为 RRF 值（约 0.016~0.033），与旧 COSINE 分不可比；
     # 工具无 score 阈值过滤（9-RAG.md 遗留 #5），下游无绝对值依赖
     hits = await asyncio.to_thread(retriever.hybrid_search, query, top_k=top_k)
+
+    if rerank and hits:
+        # cross-encoder 精排（阶段六后续）：按 query-doc 相关度重排，压噪声
+        from app.agent.rag.reranker import Reranker
+        from app.config.settings import settings
+        reranker = Reranker(
+            api_key=settings.effective_rerank_api_key,
+            base_url=settings.effective_rerank_base_url,
+            model=settings.rerank_model,
+        )
+        docs = [h.chunk.text for h in hits]
+        order = await asyncio.to_thread(reranker.rerank, query, docs, top_k)
+        hits = [hits[i] for i in order]
 
     return ok(
         {

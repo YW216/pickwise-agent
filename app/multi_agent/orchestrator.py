@@ -35,7 +35,6 @@ from app.agent.tools.manager import ToolManager
 from app.multi_agent.context_pack import ContextPack, build_working_messages
 from app.prompts.agents import RESULT_PROMPT
 from app.identity import SessionIdentity, validate_user_id
-from app.services.async_runtime import GatedAsyncClient, run_sync
 
 
 class MultiAgentOrchestrator:
@@ -52,7 +51,6 @@ class MultiAgentOrchestrator:
         mcp_enabled: bool | None = None,
         database_url: str | None = None,
         client=None,
-        llm_gate=None,
     ):
         self.identity = identity
         if identity is not None:
@@ -75,10 +73,9 @@ class MultiAgentOrchestrator:
                 timeout=settings.openai_timeout,
                 max_retries=settings.openai_max_retries,
             )
-        # 并发闸门（阶段二）：HTTP 路径传入共享 runtime 的闸门；CLI 无并发
-        # 需求时自建（同默认值），保证限流语义在两条入口一致。
-        self.client = GatedAsyncClient(client, llm_gate or asyncio.Semaphore(
-            settings.llm_max_concurrency))
+        # 限流已移除（阶段八裁定）：自用场景并发极低，供应商 429 由
+        # client 的 max_retries 兜底；接公网时再恢复闸门包装（见 git 历史）。
+        self.client = client
         self.model = settings.model_name
         self.temperature = settings.temperature
         self.context_window = settings.context_window
