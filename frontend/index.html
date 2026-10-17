@@ -16,13 +16,21 @@
         </div>
         <div class="topbar-actions">
           <span id="session-status" class="status-pill">正在连接</span>
-          <button id="new-session" class="button button-secondary" type="button">
-            新建会话
-          </button>
         </div>
       </header>
 
       <section class="workspace" aria-label="PickWise 工作区">
+        <aside class="session-panel" aria-label="会话列表">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">CONVERSATIONS</p>
+              <h2>会话</h2>
+            </div>
+            <button id="new-session" class="icon-button" type="button" title="新建会话" aria-label="新建会话">+</button>
+          </div>
+          <div id="session-list" class="session-list" aria-live="polite"></div>
+        </aside>
+
         <section class="chat-panel">
           <div id="messages" class="messages" aria-live="polite"></div>
           <div id="chat-error" class="inline-error" role="alert" hidden></div>

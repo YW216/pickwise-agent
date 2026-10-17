@@ -21,7 +21,13 @@ from app.api.auth import (
     AnonymousIdentity,
     AuthError,
 )
-from app.api.deps import get_auth, get_current_user, get_session_manager, require_csrf
+from app.api.deps import (
+    get_auth,
+    get_current_user,
+    get_session_manager,
+    get_session_service,
+    require_csrf,
+)
 from app.api.envelope import (
     clear_auth_cookie,
     error,
@@ -38,6 +44,7 @@ from app.services.session_manager import (
     SessionManager,
     SessionManagerError,
 )
+from app.services.session_service import SessionService, SessionServiceNotFound
 
 sessions_router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 chat_router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -105,11 +112,151 @@ async def create_session(
 ):
     """创建窗口：服务端生成 UUID 并持久化空会话归属；不调用模型。"""
     request_id = new_request_id()
-    identity = await manager.create_session(user.user_id)
+    service = getattr(request.app.state, "session_service", None)
+    if service is not None:
+        state = await service.create_session(user.user_id, title=body.title)
+        payload = {
+            "session_id": state.session_id,
+            "user_id": state.user_id,
+            "title": state.title,
+            "created_at": state.created_at.isoformat(),
+            "updated_at": state.updated_at.isoformat(),
+        }
+    else:
+        identity = await manager.create_session(user.user_id)
+        payload = {
+            "session_id": identity.session_id,
+            "user_id": identity.user_id,
+            "title": body.title,
+        }
     return success(
-        {"session_id": identity.session_id, "user_id": identity.user_id},
+        payload,
         request_id, status_code=201,
     )
+
+
+@sessions_router.get("")
+async def list_sessions(
+    request: Request,
+    user: AnonymousIdentity = Depends(get_current_user),
+    service: SessionService = Depends(get_session_service),
+):
+    """返回当前用户的会话摘要列表。"""
+    request_id = new_request_id()
+    rows = await service.list_sessions(user.user_id)
+    return success(
+        {
+            "sessions": [
+                {
+                    "session_id": row.session_id,
+                    "title": row.title,
+                    "status": row.status,
+                    "message_count": row.message_count,
+                    "created_at": row.created_at.isoformat(),
+                    "updated_at": row.updated_at.isoformat(),
+                    "last_message_at": (
+                        row.last_message_at.isoformat()
+                        if row.last_message_at else None
+                    ),
+                }
+                for row in rows
+            ],
+        },
+        request_id,
+    )
+
+
+@sessions_router.get("/{session_id}/messages")
+async def session_messages(
+    session_id: str,
+    request: Request,
+    user: AnonymousIdentity = Depends(get_current_user),
+    service: SessionService = Depends(get_session_service),
+):
+    """返回当前用户可见的历史消息，不暴露 tool trace。"""
+    request_id = new_request_id()
+    try:
+        messages = await service.get_visible_messages(user.user_id, session_id)
+    except SessionServiceNotFound:
+        return error(404, "SESSION_NOT_FOUND", "会话不存在", request_id)
+    return success(
+        {
+            "session_id": session_id,
+            "messages": [
+                {
+                    "message_id": message.message_id,
+                    "role": message.role,
+                    "content": message.content,
+                    "created_at": (
+                        message.created_at.isoformat()
+                        if message.created_at else None
+                    ),
+                }
+                for message in messages
+            ],
+        },
+        request_id,
+    )
+
+
+@sessions_router.get("/{session_id}")
+async def get_session(
+    session_id: str,
+    request: Request,
+    user: AnonymousIdentity = Depends(get_current_user),
+    service: SessionService = Depends(get_session_service),
+):
+    """返回当前用户的会话元数据和可见消息。"""
+    request_id = new_request_id()
+    try:
+        state = await service.get_session(user.user_id, session_id)
+    except SessionServiceNotFound:
+        return error(404, "SESSION_NOT_FOUND", "会话不存在", request_id)
+    return success(
+        {
+            "session_id": state.session_id,
+            "title": state.title,
+            "summary": state.summary,
+            "version": state.version,
+            "status": state.status,
+            "messages": [
+                {
+                    "message_id": message.message_id,
+                    "role": message.role,
+                    "content": message.content,
+                    "created_at": (
+                        message.created_at.isoformat()
+                        if message.created_at else None
+                    ),
+                }
+                for message in await service.get_visible_messages(
+                    user.user_id, session_id,
+                )
+            ],
+        },
+        request_id,
+    )
+
+
+@sessions_router.delete("/{session_id}")
+async def delete_session(
+    session_id: str,
+    request: Request,
+    user: AnonymousIdentity = Depends(require_csrf),
+    manager: SessionManager = Depends(get_session_manager),
+):
+    """删除当前用户的会话快照。"""
+    request_id = new_request_id()
+    try:
+        identity = _identity_for(user, session_id)
+        await manager.delete_session(identity)
+    except SessionServiceNotFound:
+        return error(404, "SESSION_NOT_FOUND", "会话不存在", request_id)
+    except SessionNotFound:
+        return error(404, "SESSION_NOT_FOUND", "会话不存在", request_id)
+    except SessionBusy:
+        return error(409, "SESSION_BUSY", "会话正在处理中，请稍后重试", request_id)
+    return success({"session_id": session_id, "deleted": True}, request_id)
 
 
 @chat_router.post("")

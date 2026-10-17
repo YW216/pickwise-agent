@@ -19,6 +19,7 @@ from app.api.auth import (
 from app.api.envelope import clear_auth_cookie
 from app.config.settings import settings
 from app.services.session_manager import SessionManager
+from app.services.session_service import SessionService
 
 
 def get_auth(request: Request) -> AnonymousAuth:
@@ -27,6 +28,13 @@ def get_auth(request: Request) -> AnonymousAuth:
 
 def get_session_manager(request: Request) -> SessionManager:
     return request.app.state.session_manager
+
+
+def get_session_service(request: Request) -> SessionService:
+    service = getattr(request.app.state, "session_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="会话服务未配置")
+    return service
 
 
 def _unauthorized(message: str) -> HTTPException:

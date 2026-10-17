@@ -10,7 +10,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.app import create_app
+from app.api.testing import create_test_app
 from tests.test_session_manager import FakeAgent, FactoryRecorder
 
 SECRET = "api-test-secret-key-0123456789abcdef"  # 40 字节
@@ -23,7 +23,7 @@ def factory():
 
 @pytest.fixture
 def app(tmp_path, factory):
-    return create_app(auth_secret_key=SECRET, session_dir=tmp_path,
+    return create_test_app(auth_secret_key=SECRET, session_dir=tmp_path,
                       factory=factory)
 
 
@@ -189,8 +189,8 @@ def test_request_body_too_large_is_413(client):
 # ---------- 两个应用实例互不共享 ----------
 
 def test_two_app_instances_do_not_share_managers(tmp_path, factory):
-    app1 = create_app(auth_secret_key=SECRET, session_dir=tmp_path / "one")
-    app2 = create_app(auth_secret_key=SECRET, session_dir=tmp_path / "two")
+    app1 = create_test_app(auth_secret_key=SECRET, session_dir=tmp_path / "one")
+    app2 = create_test_app(auth_secret_key=SECRET, session_dir=tmp_path / "two")
     with TestClient(app1) as c1, TestClient(app2) as c2:
         user1 = _init_user(c1)
         session1 = _create_session(c1, user1)

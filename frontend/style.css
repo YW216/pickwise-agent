@@ -36,8 +36,21 @@ h2 { margin-bottom: 0; font-size: 22px; letter-spacing: -.02em; }
 .button-primary:hover:not(:disabled) { background: var(--green-dark); }
 .button-secondary { color: var(--green-dark); border: 1px solid #bdd5c9; background: #f8fbf9; }
 
-.workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .8fr); gap: 18px; align-items: stretch; }
-.chat-panel, .catalog-panel { min-height: 680px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: 0 12px 30px rgba(33, 60, 48, .06); }
+.workspace { display: grid; grid-template-columns: 230px minmax(0, 1.35fr) minmax(300px, .75fr); gap: 18px; align-items: stretch; }
+.session-panel, .chat-panel, .catalog-panel { min-height: 680px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: 0 12px 30px rgba(33, 60, 48, .06); }
+.session-panel { padding: 20px 14px; }
+.icon-button { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid #bdd5c9; border-radius: 8px; color: var(--green-dark); background: #f8fbf9; font-size: 21px; line-height: 1; }
+.session-list { display: grid; gap: 7px; margin-top: 20px; }
+.session-item { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; align-items: stretch; border: 1px solid transparent; border-radius: 8px; }
+.session-item.is-active { border-color: #b9decd; background: var(--mint); }
+.session-select, .session-delete { border: 0; background: transparent; }
+.session-select { min-width: 0; padding: 10px 8px; color: var(--ink); text-align: left; }
+.session-select strong, .session-select span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-select strong { font-size: 13px; }
+.session-select span { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.session-delete { color: var(--muted); font-size: 17px; }
+.session-delete:hover { color: var(--coral); }
+.session-empty { padding: 12px 4px; color: var(--muted); font-size: 12px; }
 .chat-panel { display: flex; flex-direction: column; overflow: hidden; }
 .messages { flex: 1; min-height: 0; overflow: auto; padding: 28px; }
 .message { max-width: 80%; margin-bottom: 18px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); }
@@ -75,6 +88,8 @@ h2 { margin-bottom: 0; font-size: 22px; letter-spacing: -.02em; }
   .topbar { align-items: flex-start; flex-direction: column; gap: 16px; }
   .topbar-actions { width: 100%; justify-content: space-between; }
   .workspace { grid-template-columns: 1fr; }
+  .session-panel { min-height: 0; }
+  .session-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chat-panel { min-height: 620px; }
 }
 
@@ -85,4 +100,5 @@ h2 { margin-bottom: 0; font-size: 22px; letter-spacing: -.02em; }
   .composer-footer { align-items: flex-end; flex-direction: column; }
   .composer-footer .button { width: 100%; }
   .catalog-panel { padding: 18px; }
+  .session-list { grid-template-columns: 1fr; }
 }

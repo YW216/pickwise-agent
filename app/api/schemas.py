@@ -14,6 +14,8 @@ class SessionCreateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    title: str = Field(default="新会话", min_length=1, max_length=200)
+
 
 class ChatRequest(BaseModel):
     """POST /api/chat：窗口编号 + 消息正文。"""

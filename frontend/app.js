@@ -1,6 +1,7 @@
 const state = {
   csrfToken: "",
   sessionId: "",
+  sessions: [],
   busy: false,
 };
 
@@ -12,6 +13,7 @@ const elements = {
   chatError: document.querySelector("#chat-error"),
   sessionStatus: document.querySelector("#session-status"),
   newSession: document.querySelector("#new-session"),
+  sessionList: document.querySelector("#session-list"),
   productForm: document.querySelector("#product-form"),
   productQuery: document.querySelector("#product-query"),
   productResults: document.querySelector("#product-results"),
@@ -27,7 +29,7 @@ async function requestJson(path, options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = payload?.error?.message || `请求失败（${response.status}）`;
+    const message = payload?.error?.message || payload?.detail || `请求失败（${response.status}）`;
     const error = new Error(message);
     error.payload = payload;
     error.status = response.status;
@@ -66,6 +68,41 @@ function appendMessage(role, text, meta = "") {
   return wrapper;
 }
 
+function renderHistory(messages) {
+  elements.messages.replaceChildren();
+  if (!messages.length) {
+    appendMessage("assistant", "你好，我是 PickWise。告诉我预算、使用场景和在意的参数，我会帮你缩小选择范围。", "空会话");
+    return;
+  }
+  for (const message of messages) {
+    appendMessage(message.role, message.content);
+  }
+}
+
+function renderSessionList() {
+  elements.sessionList.replaceChildren();
+  if (!state.sessions.length) {
+    const empty = document.createElement("div");
+    empty.className = "session-empty";
+    empty.textContent = "还没有会话";
+    elements.sessionList.append(empty);
+    return;
+  }
+  for (const session of state.sessions) {
+    const item = document.createElement("article");
+    item.className = `session-item${session.session_id === state.sessionId ? " is-active" : ""}`;
+    item.dataset.sessionId = session.session_id;
+    item.innerHTML = `
+      <button class="session-select" type="button" data-action="select" data-session-id="${escapeHtml(session.session_id)}">
+        <strong>${escapeHtml(session.title || "新会话")}</strong>
+        <span>${session.message_count || 0} 条消息</span>
+      </button>
+      <button class="session-delete" type="button" title="删除会话" aria-label="删除会话" data-action="delete" data-session-id="${escapeHtml(session.session_id)}">×</button>
+    `;
+    elements.sessionList.append(item);
+  }
+}
+
 function setBusy(busy) {
   state.busy = busy;
   elements.sendButton.disabled = busy;
@@ -79,18 +116,49 @@ async function initializeIdentity() {
   state.csrfToken = payload.data.csrf_token;
 }
 
-async function createSession({ clearMessages = true } = {}) {
+async function refreshSessions() {
+  const payload = await requestJson("/api/sessions");
+  state.sessions = payload.data.sessions || [];
+  renderSessionList();
+  return state.sessions;
+}
+
+async function createSession() {
   const payload = await requestJson("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Pickwise-CSRF": state.csrfToken },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ title: "新会话" }),
   });
   state.sessionId = payload.data.session_id;
-  if (clearMessages) {
-    elements.messages.replaceChildren();
-    appendMessage("assistant", "你好，我是 PickWise。告诉我预算、使用场景和在意的参数，我会帮你缩小选择范围。", "会话已准备就绪");
-  }
+  localStorage.setItem("pickwise.sessionId", state.sessionId);
+  await refreshSessions();
+  renderHistory([]);
   setStatus("会话已连接", "status-ready");
+}
+
+async function loadSession(sessionId) {
+  const payload = await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/messages`);
+  state.sessionId = payload.data.session_id;
+  localStorage.setItem("pickwise.sessionId", state.sessionId);
+  renderHistory(payload.data.messages || []);
+  renderSessionList();
+  setStatus("会话已连接", "status-ready");
+}
+
+async function deleteSession(sessionId) {
+  await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    headers: { "X-Pickwise-CSRF": state.csrfToken },
+  });
+  const remaining = await refreshSessions();
+  if (state.sessionId === sessionId) {
+    state.sessionId = "";
+    if (remaining.length) {
+      await loadSession(remaining[0].session_id);
+    } else {
+      await createSession();
+    }
+  }
 }
 
 async function sendMessage(message) {
@@ -109,7 +177,7 @@ async function sendMessage(message) {
 
 async function handleChatSubmit(event) {
   event.preventDefault();
-  if (state.busy) return;
+  if (state.busy || !state.sessionId) return;
   const message = elements.messageInput.value.trim();
   if (!message) return;
 
@@ -121,6 +189,7 @@ async function handleChatSubmit(event) {
   try {
     const reply = await sendMessage(message);
     appendMessage("assistant", reply);
+    await refreshSessions();
     setStatus("会话已连接", "status-ready");
   } catch (error) {
     showChatError(error.message);
@@ -191,6 +260,21 @@ elements.newSession.addEventListener("click", async () => {
     setStatus("连接异常", "status-error");
   }
 });
+elements.sessionList.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button || state.busy) return;
+  const sessionId = button.dataset.sessionId;
+  try {
+    if (button.dataset.action === "delete") {
+      if (window.confirm("确定删除这个会话吗？")) await deleteSession(sessionId);
+    } else {
+      await loadSession(sessionId);
+    }
+  } catch (error) {
+    showChatError(error.message);
+    setStatus("连接异常", "status-error");
+  }
+});
 elements.messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -201,7 +285,14 @@ elements.messageInput.addEventListener("keydown", (event) => {
 (async function boot() {
   try {
     await initializeIdentity();
-    await createSession();
+    const sessions = await refreshSessions();
+    const preferred = localStorage.getItem("pickwise.sessionId");
+    const selected = sessions.find((item) => item.session_id === preferred) || sessions[0];
+    if (selected) {
+      await loadSession(selected.session_id);
+    } else {
+      await createSession();
+    }
     elements.messageInput.focus();
   } catch (error) {
     showChatError(error.message);

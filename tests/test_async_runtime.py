@@ -14,7 +14,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.app import create_app
+from app.api.testing import create_test_app
 from app.config.settings import settings
 from app.services.async_runtime import AsyncRuntime, RuntimeConfig
 from tests.test_session_manager import FactoryRecorder
@@ -65,7 +65,7 @@ def test_open_twice_is_rejected():
 
 def test_lifespan_creates_and_closes_runtime(tmp_path):
     """HTTP 应用启动后 app.state.async_runtime 就绪，退出后释放。"""
-    app = create_app(
+    app = create_test_app(
         auth_secret_key=SECRET,
         session_dir=tmp_path,
         factory=FactoryRecorder(),

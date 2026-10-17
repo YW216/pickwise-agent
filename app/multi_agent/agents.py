@@ -96,6 +96,13 @@ class SubAgent:
                 response = await self._complete(working, self.tool_manager.tool_definitions)
             except Exception as exc:
                 if not isinstance(exc, ContextOverflowError) and not is_context_overflow(exc):
+                    # 诊断：str(exc) 常只是一句 "Connection error."，真实根因在
+                    # __cause__ 链上（httpx 的 DNS/代理/超时细节），逐层打出便于排障
+                    chain, node = [], exc
+                    while node is not None:
+                        chain.append(f"{type(node).__name__}: {node}")
+                        node = node.__cause__
+                    print(f"[agent:{self.name}] 模型调用失败，根因链: " + " ← ".join(chain), flush=True)
                     raise
                 # 溢出（预检或 API 溢出）在任意步统一上抛：编排器压缩后整体重试一次。
                 # 不就地压缩——溢出的是私有 working，压共享 raw_messages 救不了本次调用；

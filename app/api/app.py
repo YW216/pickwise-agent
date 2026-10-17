@@ -146,31 +146,32 @@ class BodySizeLimitMiddleware:
                         new_request_id())(scope, receive, send)
 
 
-def create_app(*, auth_secret_key: str | None = None,
-               session_dir: str | Path | None = None,
-               factory=None,
-               idempotency_store=None,
-               session_service: SessionService | None = None) -> FastAPI:
-    """创建 FastAPI 应用；三个注入参数仅供测试，生产读配置。
+def create_app() -> FastAPI:
+    """创建生产 FastAPI 应用。
 
-    factory：identity → 运行对象。默认构造真实 MultiAgentOrchestrator；
-        测试必须注入假 factory，绝不让单元测试打到真实模型。
-    idempotency_store：聊天幂等存储。生产默认使用 PostgreSQL，测试可注入
-        InMemoryIdempotencyStore，避免测试依赖外部数据库。
+    生产入口不接受测试替身和临时路径，固定使用 settings、PostgreSQL、
+    真实 MultiAgentOrchestrator 与 PostgreSQL 幂等存储。
     """
-    injected = auth_secret_key is not None
-    secret = auth_secret_key if injected else settings.auth_secret_key
-    if not injected:
-        settings.assert_auth_configured()  # 配置错误阻止启动（§4.6）
+    settings.assert_auth_configured()
+    secret = settings.auth_secret_key
     if len(secret.encode()) < 32:
         raise RuntimeError("AUTH_SECRET_KEY 过弱：至少 32 字节高强度随机材料")
-    # 显式注入 auth_secret_key 是测试/嵌入式调用的信号；这类 app 保持
-    # 原本地文件路径，避免测试用多个事件循环共享一个异步 PG 池。
-    # 生产惰性入口不注入 secret，因此默认启用 PostgreSQL SessionService。
-    if factory is None and session_service is None and not injected:
-        session_service = SessionService(
+
+    return _build_app(
+        secret=secret,
+        session_dir=Path(settings.web_session_dir),
+        factory=None,
+        idempotency_store=PostgresIdempotencyStore(settings.database_url),
+        session_service=SessionService(
             PostgresSessionStore(settings.database_url)
-        )
+        ),
+    )
+
+
+def _build_app(*, secret: str, session_dir: str | Path,
+               factory=None, idempotency_store=None,
+               session_service: SessionService | None = None) -> FastAPI:
+    """组装应用的公共实现；测试通过 ``app.api.testing`` 调用。"""
     orchestrator_factory = factory or (
         # 所有窗口的 orchestrator 复用共享 AsyncOpenAI（连接池共享）；
         # 模型并发限流已移除（阶段八裁定，自用场景无对手方）

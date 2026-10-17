@@ -226,6 +226,38 @@ class SessionManager:
         entry.save_failed = not outcome.persisted
         return outcome
 
+    async def delete_session(self, identity: SessionIdentity) -> None:
+        """关闭当前进程中的 Agent 后删除持久化会话。"""
+        self._check_open()
+        key = (identity.user_id, identity.session_id)
+        entry = self._entries.get(key)
+        if entry is not None:
+            if entry.busy:
+                raise SessionBusy("窗口正在处理上一条消息，请稍后再试")
+            entry.closing = True
+            await self._close_entry(entry, save=False)
+        if self._session_service is not None:
+            try:
+                await self._session_service.delete_session(
+                    identity.user_id, identity.session_id,
+                )
+            except SessionServiceNotFound as exc:
+                raise SessionNotFound("窗口不存在，请先创建") from exc
+            return
+        if not await asyncio.to_thread(self._verify_owned_file, identity):
+            raise SessionNotFound("窗口不存在，请先创建")
+        await asyncio.to_thread(
+            self._delete_session_file,
+            identity,
+        )
+
+    def _delete_session_file(self, identity: SessionIdentity) -> None:
+        from app.agent.storage import delete_session
+
+        delete_session(
+            str(identity.session_path(self._session_dir)), identity=identity,
+        )
+
     async def _run_serialized(
         self, entry: _Entry, operation: Callable[[Any], Any],
     ) -> Any:
