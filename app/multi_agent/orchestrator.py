@@ -51,7 +51,9 @@ class MultiAgentOrchestrator:
         mcp_enabled: bool | None = None,
         database_url: str | None = None,
         client=None,
+        persistence_enabled: bool = True,
     ):
+        self.persistence_enabled = persistence_enabled
         self.identity = identity
         if identity is not None:
             if session_path is not None or memory_dir is not None or user_id is not None:
@@ -64,7 +66,10 @@ class MultiAgentOrchestrator:
             self.session_path = session_path or settings.session_path
             self.user_id = validate_user_id(settings.memory_user_id if user_id is None else user_id)
             memory_dir = settings.memory_dir if memory_dir is None else memory_dir
-        loaded = load_session(self.session_path, identity=self.identity)
+        loaded = (
+            load_session(self.session_path, identity=self.identity)
+            if self.persistence_enabled else None
+        )
         if client is None:
             settings.assert_openai_configured()
             client = AsyncOpenAI(
@@ -194,7 +199,8 @@ class MultiAgentOrchestrator:
                     await self.memory_manager.update_short_term(self.raw_messages[-6:])
                 except Exception as exc:
                     self._record_failure("memory", exc, affects_answer=False)
-            self._save_safely()
+            if self.persistence_enabled:
+                self._save_safely()
         return reply
 
     def _record_failure(
@@ -310,11 +316,11 @@ class MultiAgentOrchestrator:
         内存状态保留，避免「重启恢复旧聊天」；重置不调用 LLM，不清
         用户长期记忆或收藏。
         """
-        if self.identity is not None:
+        if self.persistence_enabled and self.identity is not None:
             save_session(self.session_path, [], None,
                          short_term_memory=None, products={},
                          identity=self.identity)
-        else:
+        elif self.persistence_enabled:
             delete_session(self.session_path, identity=None)
         self.raw_messages = []
         self.summary = None
@@ -322,6 +328,8 @@ class MultiAgentOrchestrator:
         self.memory_manager.reset_short_term()
 
     def save(self) -> None:
+        if not self.persistence_enabled:
+            return
         save_session(
             self.session_path, self.raw_messages, self.summary,
             short_term_memory=self.memory_manager.stm_to_dict(),

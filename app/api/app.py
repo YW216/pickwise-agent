@@ -38,6 +38,8 @@ from app.multi_agent.orchestrator import MultiAgentOrchestrator
 from app.services.async_runtime import AsyncRuntime
 from app.services.idempotency import PostgresIdempotencyStore
 from app.services.session_manager import SessionManager
+from app.services.session_service import SessionService
+from app.db.session_repo import PostgresSessionStore
 
 
 class DependencyProbe:
@@ -147,7 +149,8 @@ class BodySizeLimitMiddleware:
 def create_app(*, auth_secret_key: str | None = None,
                session_dir: str | Path | None = None,
                factory=None,
-               idempotency_store=None) -> FastAPI:
+               idempotency_store=None,
+               session_service: SessionService | None = None) -> FastAPI:
     """创建 FastAPI 应用；三个注入参数仅供测试，生产读配置。
 
     factory：identity → 运行对象。默认构造真实 MultiAgentOrchestrator；
@@ -161,12 +164,20 @@ def create_app(*, auth_secret_key: str | None = None,
         settings.assert_auth_configured()  # 配置错误阻止启动（§4.6）
     if len(secret.encode()) < 32:
         raise RuntimeError("AUTH_SECRET_KEY 过弱：至少 32 字节高强度随机材料")
+    # 显式注入 auth_secret_key 是测试/嵌入式调用的信号；这类 app 保持
+    # 原本地文件路径，避免测试用多个事件循环共享一个异步 PG 池。
+    # 生产惰性入口不注入 secret，因此默认启用 PostgreSQL SessionService。
+    if factory is None and session_service is None and not injected:
+        session_service = SessionService(
+            PostgresSessionStore(settings.database_url)
+        )
     orchestrator_factory = factory or (
         # 所有窗口的 orchestrator 复用共享 AsyncOpenAI（连接池共享）；
         # 模型并发限流已移除（阶段八裁定，自用场景无对手方）
         lambda identity: MultiAgentOrchestrator(
             identity=identity,
-            client=app.state.async_runtime.model_client))
+            client=app.state.async_runtime.model_client,
+            persistence_enabled=session_service is None))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -177,7 +188,9 @@ def create_app(*, auth_secret_key: str | None = None,
         app.state.session_manager = SessionManager(
             session_dir=Path(session_dir or settings.web_session_dir),
             factory=orchestrator_factory,
+            session_service=session_service,
         )
+        app.state.session_service = session_service
         app.state.idempotency_store = (
             idempotency_store
             or PostgresIdempotencyStore(settings.database_url)

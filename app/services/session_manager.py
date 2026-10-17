@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,8 @@ from uuid import uuid4
 
 from app.agent.storage import load_session, save_session
 from app.identity import SessionIdentity, SessionOwnershipError, validate_user_id
+from app.services.session_service import SessionService, SessionServiceNotFound
+from app.services.session_store import SessionMessage, SessionState
 
 
 class SessionManagerError(Exception):
@@ -90,6 +93,7 @@ class _Entry:
     busy: bool = False        # 本轮 chat 正在执行（同步检查并占用，忙时拒绝）
     save_failed: bool = False # 本轮持久化失败：TTL 暂不回收，保留内存中的最新数据
     closing: bool = False
+    state: SessionState | None = None
 
 
 class SessionManager:
@@ -105,12 +109,14 @@ class SessionManager:
         *,
         session_dir: str | Path,
         factory: Callable[[SessionIdentity], Any],
+        session_service: SessionService | None = None,
         clock: Callable[[], float] | None = None,
         ttl_seconds: float = 1800,
         max_sessions: int = 100,
     ):
         self._session_dir = Path(session_dir)
         self._factory = factory
+        self._session_service = session_service
         self._clock = clock or time.monotonic
         self._ttl_seconds = ttl_seconds
         self._max_sessions = max_sessions
@@ -135,6 +141,9 @@ class SessionManager:
     async def create_session(self, user_id: str) -> SessionIdentity:
         self._check_open()
         validate_user_id(user_id)
+        if self._session_service is not None:
+            state = await self._session_service.create_session(user_id)
+            return SessionIdentity(user_id=state.user_id, session_id=state.session_id)
         return await asyncio.to_thread(self._create_session_file, user_id)
 
     def _create_session_file(self, user_id: str) -> SessionIdentity:
@@ -167,10 +176,20 @@ class SessionManager:
                 f"运行窗口数已达上限（{self._max_sessions}），请稍后重试"
             )
 
-        # Entry 可以被回收，但重建前仍需校验窗口文件和归属。
-        found = await asyncio.to_thread(self._verify_owned_file, identity)
-        if not found:
-            raise SessionNotFound("窗口不存在，请先创建")
+        # Entry 可以被回收。生产 Web 路径从 PostgreSQL 恢复快照；
+        # CLI/测试路径继续校验本地 JSON 文件。
+        state = None
+        if self._session_service is not None:
+            try:
+                state = await self._session_service.get_session(
+                    identity.user_id, identity.session_id,
+                )
+            except SessionServiceNotFound as exc:
+                raise SessionNotFound("窗口不存在，请先创建") from exc
+        else:
+            found = await asyncio.to_thread(self._verify_owned_file, identity)
+            if not found:
+                raise SessionNotFound("窗口不存在，请先创建")
 
         # await 期间服务可能关闭、其他请求可能创建 Entry 或占满容量。
         self._check_open()
@@ -182,7 +201,11 @@ class SessionManager:
             raise SessionCapacityFull(
                 f"运行窗口数已达上限（{self._max_sessions}）且无空闲可回收"
             )
-        entry = _Entry(identity=identity, last_completed_at=self._clock())
+        entry = _Entry(
+            identity=identity,
+            last_completed_at=self._clock(),
+            state=state,
+        )
         self._entries[key] = entry
         return entry
 
@@ -197,7 +220,7 @@ class SessionManager:
     async def chat(self, identity: SessionIdentity, message: str) -> ChatOutcome:
         entry = await self._ensure_entry(identity)
         outcome = await self._run_serialized(
-            entry, lambda agent: self._chat_agent(agent, message),
+            entry, lambda _agent: self._chat_entry(entry, message),
         )
         # 持久化失败标记：TTL 暂不回收该窗口，避免丢失内存中的最新数据
         entry.save_failed = not outcome.persisted
@@ -228,6 +251,8 @@ class SessionManager:
                         entry.agent = await asyncio.to_thread(
                             self._factory, entry.identity,
                         )
+                        if entry.state is not None:
+                            self._restore_agent_state(entry.agent, entry.state)
                     return await operation(entry.agent)
                 except Exception:
                     if entry.agent is None:
@@ -248,16 +273,65 @@ class SessionManager:
         failures = list(getattr(agent, "last_failures", []))
         failed = any(item.get("affects_answer") for item in failures)
         persisted = not any(item.get("stage") == "persistence" for item in failures)
-        warnings = tuple(
+        warnings = [
             f"{item.get('stage', 'unknown')}_failed".upper()
             for item in failures if not item.get("affects_answer")
-        )
+        ]
+        # 当前方法由 _run_serialized 通过 entry 包装调用；保留这里的返回形状，
+        # 数据库快照写入由 _chat_entry 完成。
         return ChatOutcome(
             reply=reply,
             failed=failed,
             persisted=persisted,
-            warnings=warnings,
+            warnings=tuple(warnings),
         )
+
+    async def _chat_entry(self, entry: _Entry, message: str) -> ChatOutcome:
+        outcome = await self._chat_agent(entry.agent, message)
+        if self._session_service is None:
+            return outcome
+        try:
+            entry.state = await self._persist_agent_state(entry)
+        except Exception:
+            entry.save_failed = True
+            return ChatOutcome(
+                reply=outcome.reply,
+                failed=outcome.failed,
+                persisted=False,
+                warnings=(*outcome.warnings, "PERSISTENCE_FAILED"),
+            )
+        return outcome
+
+    async def _persist_agent_state(self, entry: _Entry) -> SessionState:
+        if entry.state is None:
+            raise SessionNotFound("窗口状态不存在")
+        agent = entry.agent
+        messages = tuple(_messages_from_agent(agent.raw_messages))
+        state = SessionState(
+            user_id=entry.state.user_id,
+            session_id=entry.state.session_id,
+            title=entry.state.title,
+            summary=agent.summary,
+            short_term_memory=agent.memory_manager.stm_to_dict() or {},
+            products=copy.deepcopy(agent.products),
+            version=entry.state.version,
+            status=entry.state.status,
+            created_at=entry.state.created_at,
+            updated_at=entry.state.updated_at,
+            last_message_at=entry.state.last_message_at,
+            messages=messages,
+        )
+        return await self._session_service.save_session(
+            state, expected_version=entry.state.version,
+        )
+
+    @staticmethod
+    def _restore_agent_state(agent: Any, state: SessionState) -> None:
+        agent.raw_messages = [_agent_message_from_session(item) for item in state.messages]
+        agent.summary = state.summary
+        agent.products = copy.deepcopy(state.products)
+        if state.short_term_memory:
+            agent.memory_manager.restore_stm(state.short_term_memory)
 
     # ---- TTL 回收 ----
 
@@ -353,7 +427,11 @@ class SessionManager:
         async with entry.lock:
             if entry.agent is not None:
                 if save:
-                    await asyncio.to_thread(entry.agent.save)
+                    if self._session_service is None:
+                        await asyncio.to_thread(entry.agent.save)
+                    elif entry.save_failed:
+                        entry.state = await self._persist_agent_state(entry)
+                        entry.save_failed = False
                 await entry.agent.close()
                 entry.agent = None
             key = (entry.identity.user_id, entry.identity.session_id)
@@ -362,3 +440,39 @@ class SessionManager:
 
     def session_count(self) -> int:
         return len(self._entries)
+
+
+def _messages_from_agent(raw_messages: list[dict]) -> list[SessionMessage]:
+    """把 OpenAI message dict 转成 JSONB 快照契约。"""
+    out: list[SessionMessage] = []
+    for raw in raw_messages:
+        role = raw.get("role")
+        if role not in {"user", "assistant", "tool"}:
+            continue
+        metadata = {
+            key: copy.deepcopy(value)
+            for key, value in raw.items()
+            if key not in {"role", "content", "tool_call_id"}
+        }
+        content = raw.get("content")
+        out.append(
+            SessionMessage(
+                role=role,
+                content=content if isinstance(content, str) else "",
+                tool_call_id=raw.get("tool_call_id"),
+                metadata=metadata,
+            )
+        )
+    return out
+
+
+def _agent_message_from_session(message: SessionMessage) -> dict:
+    """把 JSONB 快照消息恢复成 Agent 使用的 OpenAI message dict。"""
+    raw = {
+        "role": message.role,
+        "content": message.content,
+        **copy.deepcopy(message.metadata),
+    }
+    if message.tool_call_id is not None:
+        raw["tool_call_id"] = message.tool_call_id
+    return raw
