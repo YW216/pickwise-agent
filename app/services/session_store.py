@@ -14,15 +14,26 @@ SessionStatus = Literal["active", "archived"]
 MessageRole = Literal["user", "assistant", "tool"]
 
 
+class SessionStoreError(Exception):
+    """会话持久化层错误基类。"""
+
+
+class SessionNotFoundError(SessionStoreError):
+    """会话不存在或不属于当前用户。"""
+
+
+class SessionAlreadyExistsError(SessionStoreError):
+    """创建会话时主键已存在。"""
+
+
+class SessionVersionConflictError(SessionStoreError):
+    """乐观锁版本不匹配。"""
+
+
 @dataclass(frozen=True)
 class SessionMessage:
-    """一条完整 Agent 消息；tool/tool_calls 也保存在数据库中。"""
+    """一条完整 Agent 消息；tool/tool_calls 也保存在 JSONB 列表中。"""
 
-    user_id: str
-    session_id: str
-    turn_id: str
-    turn_index: int
-    sequence_no: int
     role: MessageRole
     content: str
     message_id: int | None = None
@@ -99,19 +110,13 @@ class SessionStore(Protocol):
         """加载完整上下文；不存在或不属于该用户时返回 None。"""
         ...
 
-    async def save_turn(
+    async def save_session(
         self,
-        user_id: str,
-        session_id: str,
-        turn_id: str,
-        messages: list[SessionMessage],
+        state: SessionState,
         *,
-        summary: str | None,
-        short_term_memory: dict[str, Any] | None,
-        products: dict[str, Any] | None,
         expected_version: int | None = None,
     ) -> SessionState:
-        """原子保存一轮消息，并更新会话快照。"""
+        """原子保存完整会话快照，并执行乐观锁校验。"""
         ...
 
     async def delete_session(self, user_id: str, session_id: str) -> None:
@@ -121,6 +126,8 @@ class SessionStore(Protocol):
 
 def visible_messages(
     messages: list[SessionMessage] | tuple[SessionMessage, ...],
+    *,
+    session_id: str,
 ) -> list[VisibleMessage]:
     """返回前端默认展示的消息投影。
 
@@ -132,7 +139,7 @@ def visible_messages(
         if message.role == "user":
             visible.append(
                 VisibleMessage(
-                    session_id=message.session_id,
+                    session_id=session_id,
                     role="user",
                     content=message.content,
                     message_id=message.message_id,
@@ -142,7 +149,7 @@ def visible_messages(
         elif message.role == "assistant" and message.content.strip():
             visible.append(
                 VisibleMessage(
-                    session_id=message.session_id,
+                    session_id=session_id,
                     role="assistant",
                     content=message.content,
                     message_id=message.message_id,

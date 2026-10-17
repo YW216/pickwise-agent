@@ -66,7 +66,7 @@ def main():
     )
     imported = init_user_schema(url, legacy_user_id=settings.memory_user_id)
     ensure_session_schema(url)
-    print("会话表已就绪（sessions / session_messages）")
+    print("会话表已就绪（sessions.messages JSONB 快照）")
     ensure_chat_idempotency_schema(url)
     print("聊天幂等表已就绪")
     print(f"用户收藏表已就绪，本次导入原 CLI 收藏 {imported} 条")
