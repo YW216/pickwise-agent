@@ -172,20 +172,21 @@ def _build_app(*, secret: str, session_dir: str | Path,
                factory=None, idempotency_store=None,
                session_service: SessionService | None = None) -> FastAPI:
     """组装应用的公共实现；测试通过 ``app.api.testing`` 调用。"""
-    orchestrator_factory = factory or (
-        # 所有窗口的 orchestrator 复用共享 AsyncOpenAI（连接池共享）；
-        # 模型并发限流已移除（阶段八裁定，自用场景无对手方）
-        lambda identity: MultiAgentOrchestrator(
-            identity=identity,
-            client=app.state.async_runtime.model_client,
-            persistence_enabled=session_service is None))
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # 启动顺序：配置校验（上方）→ 异步基础层 → SessionManager/执行器 → 清理任务（§4.6）
         app.state.auth = AnonymousAuth(secret, settings.auth_cookie_max_age_days * 86400)
         app.state.async_runtime = AsyncRuntime()
         await app.state.async_runtime.open()  # 异步模型客户端 + PG 连接池
+
+        # 模型客户端就绪后定义工厂；真实 Agent 仍延迟到首次聊天时创建。
+        # 所有窗口的 orchestrator 复用共享 AsyncOpenAI（连接池共享）。
+        orchestrator_factory = factory or (
+            lambda identity: MultiAgentOrchestrator(
+                identity=identity,
+                client=app.state.async_runtime.model_client,
+                persistence_enabled=session_service is None))
+
         app.state.session_manager = SessionManager(
             session_dir=Path(session_dir or settings.web_session_dir),
             factory=orchestrator_factory,

@@ -18,4 +18,4 @@ if sys.platform == "win32":
 import uvicorn
 
 if __name__ == "__main__":
-    uvicorn.run("app.api.app:app", host="127.0.0.1", port=8000)
+    uvicorn.run("app.api.app:app", host="127.0.0.1", reload=True, port=8000)
