@@ -228,9 +228,9 @@ def _build_app(*, secret: str, session_dir: str | Path,
     app.include_router(routes.products_router)
     app.include_router(routes.favorites_router)
     app.include_router(routes.health_router)
-    frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+    frontend_dir = Path(__file__).resolve().parents[2] / "frontend-react" / "dist"
     if frontend_dir.is_dir():
-        # API 路由已先注册，根挂载只负责静态页面和资源。
+        # API 路由已先注册，根挂载负责 React 构建产物和静态资源。
         app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     return app
 

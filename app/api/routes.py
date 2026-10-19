@@ -55,6 +55,24 @@ products_router = APIRouter(prefix="/api/products", tags=["products"])
 favorites_router = APIRouter(prefix="/api/favorites", tags=["favorites"])
 health_router = APIRouter(prefix="/api", tags=["health"])
 
+_INTERNAL_PRODUCT_ID = re.compile(r"(?<![A-Za-z0-9])(?:LP|PH|HP)-\d{2}(?!\d)")
+_PRODUCT_ID_PARENTHESES = re.compile(
+    r"\s*[（(]\s*(?:LP|PH|HP)-\d{2}\s*[）)]"
+)
+_PRODUCT_ID_PAREN_PREFIX = re.compile(
+    r"([（(])\s*(?:LP|PH|HP)-\d{2}\s*[，,、]?\s*"
+)
+
+
+def _public_assistant_text(content: str) -> str:
+    """隐藏内部商品主键；名称、价格和参数仍保持原样。"""
+    without_parentheses = _PRODUCT_ID_PARENTHESES.sub("", content)
+    without_prefix = _PRODUCT_ID_PAREN_PREFIX.sub(r"\1", without_parentheses)
+    return _INTERNAL_PRODUCT_ID.sub("候选商品", without_prefix)
+
+
+def _public_message_content(role: str, content: str) -> str:
+    return _public_assistant_text(content) if role == "assistant" else content
 
 # ---------- 匿名身份（CSRF 引导例外：不要求先有 CSRF 值，§4.3） ----------
 
@@ -188,7 +206,7 @@ async def session_messages(
                 {
                     "message_id": message.message_id,
                     "role": message.role,
-                    "content": message.content,
+                    "content": _public_message_content(message.role, message.content),
                     "created_at": (
                         message.created_at.isoformat()
                         if message.created_at else None
@@ -225,7 +243,7 @@ async def get_session(
                 {
                     "message_id": message.message_id,
                     "role": message.role,
-                    "content": message.content,
+                    "content": _public_message_content(message.role, message.content),
                     "created_at": (
                         message.created_at.isoformat()
                         if message.created_at else None
@@ -416,7 +434,8 @@ def _sse(event, data):
 
 async def _answer_events(payload, *, replayed=False):
     data = payload.get("data") or {}
-    reply = data.get("reply", "")
+    reply = _public_assistant_text(data.get("reply", ""))
+    data = {**data, "reply": reply}
     # 保留标点和换行；超长段落继续按 80 字切分，拼接必须与原文完全一致。
     chunks = re.findall(r"[^。！？\n]{1,80}[。！？\n]?|[。！？\n]", reply)
     for seq, text in enumerate(chunks):
@@ -479,7 +498,7 @@ def _chat_response(identity: SessionIdentity, outcome: ChatOutcome,
     """
     data = {
         "session_id": identity.session_id,
-        "reply": outcome.reply,
+        "reply": _public_assistant_text(outcome.reply),
         "warnings": list(outcome.warnings),
     }
     if outcome.failed:
@@ -556,12 +575,19 @@ async def compare_products_route(
                          "部分商品不存在", request_id, data)
         return error(422, "COMPARE_REQUEST_INVALID",
                      result.get("error", "对比请求不合法"), request_id)
-    return success(result["data"], request_id)
+    return success(_public_compare_data(result["data"]), request_id)
 
 
 def _detail_response(result: dict, request_id: str):
     if result["success"]:
-        return success(result["data"], request_id)
+        data = dict(result["data"])
+        product = data.get("product")
+        if isinstance(product, dict):
+            data["product"] = {
+                key: value for key, value in product.items()
+                if key != "product_id"
+            }
+        return success(data, request_id)
     if result.get("data", {}).get("unavailable"):
         return error(503, "PRODUCT_SERVICE_UNAVAILABLE",
                      "商品服务暂时不可用", request_id)
@@ -571,13 +597,78 @@ def _detail_response(result: dict, request_id: str):
 def _product_response(result: dict, request_id: str):
     """商品搜索工具信封 → HTTP（§4.5：按 data 内稳定标志判断，不匹配文案）。"""
     if result["success"]:
-        return success(result["data"], request_id)
+        return success(_public_product_data(result["data"]), request_id)
     data = result.get("data", {})
     if data.get("unavailable"):
         return error(503, "PRODUCT_SERVICE_UNAVAILABLE",
                      "商品服务暂时不可用", request_id)
     # 无匹配（含 nearest 兜底）是 200 + 空结果：matched=0 与参考标记原样透传
-    return success(data, request_id)
+    return success(_public_product_data(data), request_id)
+
+
+def _public_product_data(data: dict) -> dict:
+    """将内部商品卡片转换为用户展示卡片。
+
+    product_id 只在 Agent/数据库内部流转；HTTP 返回候选序号，避免把
+    内部目录主键暴露给浏览器。工具层仍使用原始数据，不影响详情查询。
+    """
+    payload = dict(data or {})
+    for key in ("results", "candidates", "nearest"):
+        items = payload.get(key)
+        if not isinstance(items, list):
+            continue
+        public_items = []
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                public_items.append(item)
+                continue
+            public_item = dict(item)
+            public_item.pop("product_id", None)
+            public_item["candidate_no"] = index
+            public_items.append(public_item)
+        payload[key] = public_items
+    return payload
+
+
+def _public_compare_data(data: dict) -> dict:
+    """隐藏 compare 响应中的主键，并用候选序号对齐字段值。"""
+    payload = dict(data or {})
+    products = payload.get("products")
+    if not isinstance(products, list):
+        return payload
+    refs: dict[str, str] = {}
+    public_products = []
+    for index, item in enumerate(products, start=1):
+        if not isinstance(item, dict):
+            public_products.append(item)
+            continue
+        product_id = item.get("product_id")
+        if isinstance(product_id, str):
+            refs[product_id] = f"候选 {index}"
+        public_item = {
+            key: value for key, value in item.items()
+            if key != "product_id"
+        }
+        public_item["candidate_no"] = index
+        public_products.append(public_item)
+    payload["products"] = public_products
+    fields = payload.get("fields")
+    if isinstance(fields, list):
+        public_fields = []
+        for field in fields:
+            if not isinstance(field, dict):
+                public_fields.append(field)
+                continue
+            public_field = dict(field)
+            values = field.get("values")
+            if isinstance(values, dict):
+                public_field["values"] = {
+                    refs.get(key, "候选商品"): value
+                    for key, value in values.items()
+                }
+            public_fields.append(public_field)
+        payload["fields"] = public_fields
+    return payload
 
 
 @favorites_router.get("")
