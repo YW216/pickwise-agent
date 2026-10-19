@@ -133,6 +133,7 @@ class PostgresSessionStore:
                         messages = %s,
                         short_term_memory = %s,
                         products = %s,
+                        recommendations = %s,
                         version = version + 1,
                         status = %s,
                         updated_at = now(),
@@ -148,6 +149,7 @@ class PostgresSessionStore:
                         Jsonb(payload),
                         Jsonb(state.short_term_memory or {}),
                         Jsonb(state.products or {}),
+                        Jsonb(list(state.recommendations or ())),
                         state.status,
                         last_message_at,
                         state.user_id,
@@ -201,8 +203,8 @@ class PostgresSessionStore:
             await cur.execute(
                 """
                 SELECT user_id, session_id, title, summary, messages,
-                       short_term_memory, products, version, status,
-                       created_at, updated_at, last_message_at
+                       short_term_memory, products, recommendations, version,
+                       status, created_at, updated_at, last_message_at
                 FROM sessions
                 WHERE user_id = %s AND session_id = %s
                 """,
@@ -220,11 +222,12 @@ class PostgresSessionStore:
             messages=tuple(_message_from_json(item) for item in (row[4] or [])),
             short_term_memory=row[5] or {},
             products=row[6] or {},
-            version=row[7],
-            status=row[8],
-            created_at=row[9],
-            updated_at=row[10],
-            last_message_at=row[11],
+            recommendations=tuple(row[7] or ()),
+            version=row[8],
+            status=row[9],
+            created_at=row[10],
+            updated_at=row[11],
+            last_message_at=row[12],
         )
 
 

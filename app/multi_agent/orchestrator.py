@@ -29,6 +29,13 @@ from app.agent.context_budget import (
     is_transient,
 )
 from app.agent.product_tracker import format_products_block, merge_products
+from app.db.catalog_repo import aget_products_by_ids
+from app.services.recommendations import (
+    build_recommendations,
+    merge_recommendations,
+    public_cards,
+    restore_cards,
+)
 from app.config.settings import settings
 from app.multi_agent.agents import AGENT_CONFIGS, SubAgent
 from app.multi_agent.blackboard import BlackboardEntry, render_blackboard
@@ -138,6 +145,8 @@ class MultiAgentOrchestrator:
             self.summary: Optional[str] = None
             # 商品记忆：跨压缩累积的商品 ID/名称/提及价（product_tracker 独立存储）
             self.products: dict = {}
+            # 右侧推荐卡片：跨轮累积、最近出现在前；随会话快照落盘，切回会话可恢复。
+            self.recommendations: list[dict] = []
             # 每轮重置；仅用于诊断/评测，不把内部异常写进用户回复。
             self.last_failures: list[dict] = []
 
@@ -145,6 +154,7 @@ class MultiAgentOrchestrator:
                 self.summary = loaded["summary"]
                 self.raw_messages = loaded["messages"]
                 self.products = loaded.get("products", {})
+                self.restore_recommendations(loaded.get("recommendations") or [])
                 if loaded.get("short_term_memory"):
                     self.memory_manager.restore_stm(loaded["short_term_memory"])
         except Exception:
@@ -170,7 +180,10 @@ class MultiAgentOrchestrator:
     def history_size(self) -> int:
         return len(self.raw_messages)
 
-    async def chat(self, user_input: str, events: asyncio.Queue | None = None) -> str:
+    async def chat(
+        self, user_input: str, events: asyncio.Queue | None = None,
+        product_context: list[dict] | None = None,
+    ) -> str:
         """主答复与附属工作分离：失败保留用户消息，成功答案不被记忆/落盘覆盖。
 
         入口拒绝不写历史；已入账的失败轮只补一次最终回复。
@@ -189,7 +202,9 @@ class MultiAgentOrchestrator:
             self.raw_messages.append({"role": "user", "content": user_input})
             turn_started = True
             reply = await self._chat_inner(
-                user_input, **({"events": events} if events is not None else {}),
+                user_input,
+                **({"events": events} if events is not None else {}),
+                **({"product_context": product_context} if product_context else {}),
             )
             completed = True
         except Exception as exc:  # 最外层保护用户体验；错误不靠静默吞掉处理
@@ -254,6 +269,7 @@ class MultiAgentOrchestrator:
 
     async def _chat_inner(
         self, user_input: str, events: asyncio.Queue | None = None,
+        product_context: list[dict] | None = None,
     ) -> str:
         """只完成路由、专家执行和最终回复提交；记忆/持久化在 chat 外层处理。"""
         pack = self._build_pack()
@@ -261,6 +277,12 @@ class MultiAgentOrchestrator:
         # build_working_messages + 工具 schema），供后面的专家执行准备。
         if await self._try_compact(pack):
             pack = self._build_pack()
+        if product_context:
+            pack = replace(pack, selected_products="\n".join(
+                f"- #{item.get('display_no') or 0:02d} {item.get('name') or '商品'}"
+                f"（内部 ID: {item.get('product_id', '')}）"
+                for item in product_context
+            ))
         # 路由不再做"强制压缩重试"（2026-10-08 移除，理由见下）。
         #
         # 为什么不重试：Router 根本不读完整历史——它只收「最近 4 条
@@ -324,7 +346,58 @@ class MultiAgentOrchestrator:
                     self.raw_messages.extend(entry.new_messages[:-1])
             self.raw_messages.append({"role": "assistant", "content": reply})
 
+        if self.identity is not None:
+            tool_messages = [
+                message
+                for entry in entries
+                if entry.status == "success"
+                for message in entry.new_messages
+                if message.get("role") == "tool"
+            ]
+            cards = build_recommendations(
+                reply,
+                tool_messages,
+                user_id=self.identity.user_id,
+                session_id=self.identity.session_id,
+            )
+            if cards:
+                await self._fill_missing_prices(cards)
+                self.recommendations = merge_recommendations(
+                    self.recommendations, cards,
+                )
+                emit(events, "recommendations", products=public_cards(cards))
+
         return reply
+
+    async def _fill_missing_prices(self, cards: list[dict]) -> None:
+        """正文没写价、工具视图也没带价时，回查目录真值兜底。
+
+        对比工具只返回 id + 名称，靠它单独出现的商品会缺价格；卡片上
+        显示 ¥0 比不显示更糟，所以这里补一次目录价。
+        """
+        missing = [card["product_id"] for card in cards if card.get("price") in (None, "", 0)]
+        if not missing or not self.database_url:
+            return
+        try:
+            products = await aget_products_by_ids(self.database_url, missing)
+        except Exception as exc:  # 补价失败不影响推荐卡片本身
+            self._record_failure("recommendation_price", exc, affects_answer=False)
+            return
+        for card in cards:
+            product = products.get(card["product_id"]) if card.get("price") in (None, "", 0) else None
+            if product and product.get("price") is not None:
+                card["price"] = product["price"]
+
+    def restore_recommendations(self, cards) -> None:
+        """从会话快照恢复右侧卡片，并重建本进程的 ref 映射。"""
+        if self.identity is None:
+            self.recommendations = []
+            return
+        self.recommendations = restore_cards(
+            cards,
+            user_id=self.identity.user_id,
+            session_id=self.identity.session_id,
+        )
 
     def reset(self):
         """重置会话：Web 身份原子保存空状态保留归属，CLI 删除文件。
@@ -336,12 +409,13 @@ class MultiAgentOrchestrator:
         if self.persistence_enabled and self.identity is not None:
             save_session(self.session_path, [], None,
                          short_term_memory=None, products={},
-                         identity=self.identity)
+                         recommendations=[], identity=self.identity)
         elif self.persistence_enabled:
             delete_session(self.session_path, identity=None)
         self.raw_messages = []
         self.summary = None
         self.products = {}
+        self.recommendations = []
         self.memory_manager.reset_short_term()
 
     def save(self) -> None:
@@ -351,6 +425,7 @@ class MultiAgentOrchestrator:
             self.session_path, self.raw_messages, self.summary,
             short_term_memory=self.memory_manager.stm_to_dict(),
             products=self.products,
+            recommendations=self.recommendations,
             identity=getattr(self, "identity", None),
         )
 

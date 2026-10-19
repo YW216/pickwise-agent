@@ -14,3 +14,33 @@ export interface ProductSearchResult {
   total?: number
   query?: string
 }
+
+export interface RecommendedProduct extends PublicProduct {
+  ref: string
+  display_no: number
+  reason: string
+}
+
+export interface ProductDetail {
+  name?: string
+  brand?: string
+  category?: string
+  price?: number
+  specs?: Record<string, unknown>
+  introduction?: string[]
+}
+
+export interface RecommendedProduct extends PublicProduct {
+  ref: string
+  display_no: number
+  reason: string
+}
+
+export interface ProductDetail {
+  name?: string
+  brand?: string
+  category?: string
+  price?: number
+  specs?: Record<string, unknown>
+  introduction?: string[]
+}

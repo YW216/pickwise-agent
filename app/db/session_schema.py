@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     short_term_memory JSONB NOT NULL DEFAULT '{}'::jsonb,
     messages          JSONB NOT NULL DEFAULT '[]'::jsonb,
     products          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    recommendations   JSONB NOT NULL DEFAULT '[]'::jsonb,
     version           INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
     status            VARCHAR(20) NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'archived')),
@@ -32,6 +33,9 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_updated
 -- 兼容已经创建过旧版 sessions 表的本地数据库。
 ALTER TABLE sessions
     ADD COLUMN IF NOT EXISTS messages JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS recommendations JSONB NOT NULL DEFAULT '[]'::jsonb;
 """
 
 

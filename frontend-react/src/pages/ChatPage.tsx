@@ -1,27 +1,24 @@
-import { useEffect, useReducer, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import { List, MagnifyingGlass, X } from '@phosphor-icons/react'
 import { streamChat } from '../api/chat'
-import { searchProducts } from '../api/products'
+import { loadProductDetail } from '../api/products'
 import { createSession, deleteSession, initializeIdentity, listSessions, loadMessages } from '../api/sessions'
 import { ChatComposer } from '../components/ChatComposer'
 import { ChatMessage } from '../components/ChatMessage'
-import { ProductCard } from '../components/ProductCard'
+import { ProductDetailDrawer } from '../components/ProductDetailDrawer'
+import { RecommendationPanel } from '../components/RecommendationPanel'
 import { SessionList } from '../components/SessionList'
 import { chatReducer, initialChatState } from '../store/chatStore'
-import type { PublicProduct } from '../types/product'
+import type { ProductDetail, RecommendedProduct } from '../types/product'
 
 const sessionStorageKey = 'pickwise.sessionId'
 const palettes = [{ key: 'a', name: '钛金' }, { key: 'b', name: '群青' }, { key: 'c', name: '岩紫' }] as const
-const scenes = ['全部', '游戏', '轻薄', '办公']
 
 export function ChatPage() {
   const [state, dispatch] = useReducer(chatReducer, initialChatState)
-  const [products, setProducts] = useState<PublicProduct[]>([])
-  const [productQuery, setProductQuery] = useState('')
-  const [productScene, setProductScene] = useState('全部')
-  const [productLoading, setProductLoading] = useState(false)
-  const [productSearched, setProductSearched] = useState(false)
-  const [productError, setProductError] = useState('')
+  const [detailProduct, setDetailProduct] = useState<RecommendedProduct | null>(null)
+  const [detail, setDetail] = useState<ProductDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [composerValue, setComposerValue] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [catalogOpen, setCatalogOpen] = useState(false)
@@ -47,7 +44,7 @@ export function ChatPage() {
     try {
       const result = await loadMessages(sessionId)
       if (selectedSessionRef.current === sessionId) {
-        dispatch({ type: 'MESSAGES_LOADED', messages: result.messages })
+        dispatch({ type: 'MESSAGES_LOADED', messages: result.messages, recommendations: result.recommendations })
       }
     } catch (error) {
       if (selectedSessionRef.current === sessionId) {
@@ -133,14 +130,14 @@ export function ChatPage() {
     }
   }
 
-  async function handleSend(message: string) {
+  async function handleSend(message: string, productRefs: string[] = []) {
     const sessionId = state.currentSessionId
     if (!sessionId || state.loading || controllerRef.current) return
     const controller = new AbortController()
     controllerRef.current = controller
     dispatch({ type: 'STREAM_STARTED', message })
     try {
-      await streamChat({ session_id: sessionId, message }, crypto.randomUUID(), controller.signal,
+      await streamChat({ session_id: sessionId, message, product_refs: productRefs }, crypto.randomUUID(), controller.signal,
         (event) => dispatch({ type: 'STREAM_EVENT', event }))
       await refreshSessions().catch(() => undefined)
     } catch (error) {
@@ -154,25 +151,32 @@ export function ChatPage() {
     }
   }
 
-  async function findProducts(scene = productScene) {
-    const query = [productQuery.trim(), scene === '全部' ? '' : scene].filter(Boolean).join(' ')
-    if (!query || productLoading) return
-    setProductLoading(true)
-    setProductError('')
+  async function openDetails(product: RecommendedProduct) {
+    if (!state.currentSessionId) return
+    setDetailProduct(product)
+    setDetail(null)
+    setDetailLoading(true)
     try {
-      const result = await searchProducts(query)
-      setProducts(result.results || result.candidates || [])
-      setProductSearched(true)
+      const result = await loadProductDetail(state.currentSessionId, product.ref)
+      setDetail(result.product)
     } catch (error) {
-      setProductError(error instanceof Error ? error.message : '商品检索失败')
+      dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '商品详情加载失败' })
     } finally {
-      setProductLoading(false)
+      setDetailLoading(false)
     }
   }
 
-  function handleProductSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    void findProducts()
+  function toggleCompare(ref: string) {
+    dispatch({ type: 'TOGGLE_COMPARE', ref })
+  }
+
+  function compareSelected() {
+    const selected = state.recommendations.filter((product) => state.selectedRefs.includes(product.ref))
+    if (selected.length < 2) return
+    const message = `请对比本轮选中的商品：${selected.map((product) => `#${String(product.display_no).padStart(2, '0')} ${product.name}`).join('、')}。重点比较价格、关键参数和适用场景。`
+    setCatalogOpen(false)
+    // 引用随请求一起上送：服务端据此还原 product_id，不依赖回复文本猜商品。
+    void handleSend(message, state.selectedRefs)
   }
 
   const lastMessageIndex = state.messages.length - 1
@@ -212,22 +216,9 @@ export function ChatPage() {
         <ChatComposer disabled={state.loading || !state.currentSessionId} streaming={state.streaming} value={composerValue} onChange={setComposerValue} onSubmit={(message) => void handleSend(message)} onStop={() => controllerRef.current?.abort()} />
       </section>
 
-      <aside className="catalog-panel" aria-label="商品检索">
-        <div className="catalog-heading"><h2>商品检索</h2><button className="icon-button catalog-close" type="button" onClick={() => setCatalogOpen(false)} title="关闭商品检索" aria-label="关闭商品检索"><X size={19} /></button></div>
-        <p className="panel-copy">价格以当前商品目录为准。</p>
-        <form className="product-form" onSubmit={handleProductSearch}><label className="sr-only" htmlFor="product-query">搜索商品</label><input id="product-query" value={productQuery} maxLength={500} onChange={(event) => setProductQuery(event.target.value)} placeholder="搜索商品或使用场景" disabled={productLoading} /><button type="submit" disabled={productLoading || !state.initialized || (!productQuery.trim() && productScene === '全部')}>{productLoading ? '检索中' : '检索'}</button></form>
-        <div className="scene-filters" role="group" aria-label="使用场景">{scenes.map((scene) => <button key={scene} type="button" className={`query-chip ${productScene === scene ? 'is-active' : ''}`} aria-pressed={productScene === scene} disabled={productLoading || !state.initialized} onClick={() => { setProductScene(scene); void findProducts(scene) }}>{scene}</button>)}</div>
-        <div className="product-results" aria-live="polite" aria-busy={productLoading}>
-          {productError && <p className="catalog-error" role="alert">{productError}</p>}
-          {productLoading ? [1, 2, 3].map((item) => <div className="product-skeleton" key={item} />) : <>
-            {productSearched && <p className="results-count">{products.length ? `${products.length} 款候选商品` : '暂未找到匹配商品'}</p>}
-            {!productSearched && !productError && <div className="catalog-empty"><MagnifyingGlass size={26} weight="light" aria-hidden="true" /><p>还没有检索结果</p></div>}
-            {products.map((product, index) => <ProductCard key={`${product.name}-${product.candidate_no || index}`} product={product} />)}
-          </>}
-        </div>
-        <p className="catalog-note">商品信息来自当前目录，不使用示例库存。</p>
-      </aside>
+      <RecommendationPanel products={state.recommendations} selectedRefs={state.selectedRefs} onToggle={toggleCompare} onDetail={openDetails} onCompare={compareSelected} />
       {(sidebarOpen || catalogOpen) && <button className="panel-backdrop" type="button" aria-label="关闭侧栏" tabIndex={-1} onClick={() => { setSidebarOpen(false); setCatalogOpen(false) }} />}
+      <ProductDetailDrawer product={detailProduct} detail={detail} loading={detailLoading} onClose={() => setDetailProduct(null)} onCompare={() => { if (detailProduct) toggleCompare(detailProduct.ref); setDetailProduct(null) }} />
     </main>
   )
 }

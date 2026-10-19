@@ -219,10 +219,13 @@ class SessionManager:
 
     # ---- chat ----
 
-    async def chat(self, identity: SessionIdentity, message: str) -> ChatOutcome:
+    async def chat(
+        self, identity: SessionIdentity, message: str,
+        product_context: list[dict] | None = None,
+    ) -> ChatOutcome:
         entry = await self._ensure_entry(identity)
         outcome = await self._run_serialized(
-            entry, lambda _agent: self._chat_entry(entry, message),
+            entry, lambda _agent: self._chat_entry(entry, message, product_context=product_context),
         )
         # 持久化失败标记：TTL 暂不回收该窗口，避免丢失内存中的最新数据
         entry.save_failed = not outcome.persisted
@@ -231,6 +234,7 @@ class SessionManager:
     async def chat_stream(
         self, identity: SessionIdentity, message: str,
         events: asyncio.Queue,
+        product_context: list[dict] | None = None,
     ) -> asyncio.Task:
         """先占用会话，再返回执行任务；HTTP 开流前即可返回 404/429。"""
         entry = await self._ensure_entry(identity)
@@ -239,7 +243,9 @@ class SessionManager:
             raise SessionBusy("窗口正在处理上一条消息，请稍后再试")
         entry.busy = True
         return asyncio.create_task(self._run_serialized(
-            entry, lambda _agent: self._chat_entry(entry, message, events),
+            entry, lambda _agent: self._chat_entry(
+                entry, message, events, product_context=product_context,
+            ),
             reserved=True,
         ))
 
@@ -321,23 +327,28 @@ class SessionManager:
 
     async def _chat_agent(
         self, agent: Any, message: str, events: asyncio.Queue | None = None,
+        product_context: list[dict] | None = None,
     ) -> ChatOutcome:
         chat = agent.chat
         supports_events = False
-        if events is not None:
+        supports_product_context = False
+        if events is not None or product_context:
             try:
                 signature = inspect.signature(chat)
-                supports_events = (
-                    "events" in signature.parameters
-                    or any(item.kind == inspect.Parameter.VAR_KEYWORD
-                           for item in signature.parameters.values())
-                )
+                supports_events = "events" in signature.parameters
+                supports_product_context = "product_context" in signature.parameters
+                has_kwargs = any(item.kind == inspect.Parameter.VAR_KEYWORD
+                                 for item in signature.parameters.values())
+                supports_events = supports_events or has_kwargs
+                supports_product_context = supports_product_context or has_kwargs
             except (TypeError, ValueError):
                 supports_events = False
-        reply = await chat(
-            message,
-            **({"events": events} if events is not None and supports_events else {}),
-        )
+        kwargs = {}
+        if events is not None and supports_events:
+            kwargs["events"] = events
+        if product_context and supports_product_context:
+            kwargs["product_context"] = product_context
+        reply = await chat(message, **kwargs)
         failures = list(getattr(agent, "last_failures", []))
         failed = any(item.get("affects_answer") for item in failures)
         persisted = not any(item.get("stage") == "persistence" for item in failures)
@@ -356,8 +367,9 @@ class SessionManager:
 
     async def _chat_entry(
         self, entry: _Entry, message: str, events: asyncio.Queue | None = None,
+        product_context: list[dict] | None = None,
     ) -> ChatOutcome:
-        outcome = await self._chat_agent(entry.agent, message, events)
+        outcome = await self._chat_agent(entry.agent, message, events, product_context)
         if self._session_service is None:
             entry.save_failed = not outcome.persisted
             return outcome
@@ -395,6 +407,7 @@ class SessionManager:
             updated_at=entry.state.updated_at,
             last_message_at=entry.state.last_message_at,
             messages=messages,
+            recommendations=tuple(getattr(agent, "recommendations", ()) or ()),
         )
         return await self._session_service.save_session(
             state, expected_version=entry.state.version,
@@ -405,6 +418,9 @@ class SessionManager:
         agent.raw_messages = [_agent_message_from_session(item) for item in state.messages]
         agent.summary = state.summary
         agent.products = copy.deepcopy(state.products)
+        restore = getattr(agent, "restore_recommendations", None)
+        if callable(restore):
+            restore(state.recommendations)
         if state.short_term_memory:
             agent.memory_manager.restore_stm(state.short_term_memory)
 

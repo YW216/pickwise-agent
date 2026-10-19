@@ -83,6 +83,8 @@ class SessionState:
     updated_at: datetime
     last_message_at: datetime | None
     messages: tuple[SessionMessage, ...] = ()
+    # 右侧"本轮推荐"卡片快照（ref/display_no/名称/价格等）；按最近出现倒序。
+    recommendations: tuple[dict[str, Any], ...] = ()
 
 
 class SessionStore(Protocol):

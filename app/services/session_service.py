@@ -88,6 +88,7 @@ class SessionService:
                 updated_at=state.updated_at,
                 last_message_at=state.last_message_at,
                 messages=state.messages,
+                recommendations=state.recommendations,
             )
         return await self._store.save_session(
             state,

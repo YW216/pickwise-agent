@@ -39,8 +39,12 @@ from app.api.envelope import (
 )
 from app.api.schemas import ChatRequest, CompareRequest, SessionCreateRequest
 from app.config.settings import settings
+from app.db.catalog_repo import aget_products_by_ids
 from app.identity import SessionIdentity
 from app.services.idempotency import hash_request, validate_idempotency_key
+from app.services.product_refs import resolve_product_context, resolve_product_ref
+from app.services.recommendations import public_cards, restore_cards
+from app.services.session_store import visible_messages
 from app.services.session_manager import (
     ChatOutcome,
     SessionManager,
@@ -186,6 +190,27 @@ async def list_sessions(
     )
 
 
+async def _with_catalog_prices(cards: list[dict]) -> list[dict]:
+    """历史卡片缺价时回查目录：快照记的是"当时写了什么"，价格要能补上。"""
+    missing = [
+        card["product_id"] for card in cards
+        if card.get("product_id") and card.get("price") in (None, "", 0)
+    ]
+    if not missing:
+        return cards
+    try:
+        products = await aget_products_by_ids(settings.database_url, missing)
+    except Exception:
+        return cards
+    for card in cards:
+        if card.get("price") not in (None, "", 0):
+            continue
+        product = products.get(card.get("product_id"))
+        if product and product.get("price") is not None:
+            card["price"] = product["price"]
+    return cards
+
+
 @sessions_router.get("/{session_id}/messages")
 async def session_messages(
     session_id: str,
@@ -193,12 +218,14 @@ async def session_messages(
     user: AnonymousIdentity = Depends(get_current_user),
     service: SessionService = Depends(get_session_service),
 ):
-    """返回当前用户可见的历史消息，不暴露 tool trace。"""
+    """返回当前用户可见的历史消息与右侧推荐卡片，不暴露 tool trace。"""
     request_id = new_request_id()
     try:
-        messages = await service.get_visible_messages(user.user_id, session_id)
+        state = await service.get_session(user.user_id, session_id)
     except SessionServiceNotFound:
         return error(404, "SESSION_NOT_FOUND", "会话不存在", request_id)
+    messages = visible_messages(state.messages, session_id=state.session_id)
+    recommendations = await _with_catalog_prices(list(state.recommendations))
     return success(
         {
             "session_id": session_id,
@@ -214,6 +241,11 @@ async def session_messages(
                 }
                 for message in messages
             ],
+            "recommendations": public_cards(restore_cards(
+                recommendations,
+                user_id=user.user_id,
+                session_id=state.session_id,
+            )),
         },
         request_id,
     )
@@ -307,6 +339,12 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
     """两个 HTTP 入口共用鉴权后的幂等检查、执行与结果映射。"""
     request_id = new_request_id()
     identity = _identity_for(user, body.session_id)
+    product_context = []
+    for ref in body.product_refs:
+        item = resolve_product_context(identity.user_id, identity.session_id, ref)
+        if item is None:
+            return error(422, "PRODUCT_REF_INVALID", "推荐商品已失效，请重新发起推荐", request_id)
+        product_context.append(item)
 
     request_hash = None
     if idempotency_key is not None:
@@ -315,7 +353,11 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
         except ValueError as exc:
             return error(422, "IDEMPOTENCY_KEY_INVALID", str(exc), request_id)
         request_hash = hash_request(
-            {"session_id": identity.session_id, "message": body.message}
+            {
+                "session_id": identity.session_id,
+                "message": body.message,
+                "product_refs": body.product_refs,
+            }
         )
         try:
             claim = await request.app.state.idempotency_store.begin(
@@ -365,7 +407,9 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
     execution = None
     if stream:
         try:
-            execution = await manager.chat_stream(identity, body.message, events)
+            execution = await manager.chat_stream(
+                identity, body.message, events, product_context=product_context,
+            )
         except SessionManagerError as exc:
             response = session_error(exc, request_id)
             return await _finish_chat(request, identity, idempotency_key, request_hash, response)
@@ -375,7 +419,9 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
 
     async def run():
         try:
-            outcome = await execution if execution is not None else await manager.chat(identity, body.message)
+            outcome = await execution if execution is not None else await manager.chat(
+                identity, body.message, product_context=product_context,
+            )
         except SessionManagerError as exc:
             response = session_error(exc, request_id)
         except Exception:
@@ -554,6 +600,24 @@ async def product_detail(
         return error(422, "PRODUCT_ID_INVALID", "商品编号不合法", request_id)
     result = await get_detail(product_id)
     return _detail_response(result, request_id)
+
+
+@products_router.get("/ref/{product_ref}")
+async def product_ref_detail(
+    product_ref: str,
+    session_id: str = Query(..., min_length=36, max_length=36),
+    user: AnonymousIdentity = Depends(get_current_user),
+):
+    """使用当前会话推荐引用查询详情，不把内部 product_id 暴露给前端。"""
+    request_id = new_request_id()
+    try:
+        identity = SessionIdentity(user_id=user.user_id, session_id=session_id)
+    except ValueError:
+        return error(422, "SESSION_ID_INVALID", "会话编号不合法", request_id)
+    product_id = resolve_product_ref(identity.user_id, identity.session_id, product_ref)
+    if product_id is None:
+        return error(404, "PRODUCT_REF_NOT_FOUND", "推荐商品已失效，请重新发起推荐", request_id)
+    return _detail_response(await get_detail(product_id), request_id)
 
 
 @products_router.post("/compare")

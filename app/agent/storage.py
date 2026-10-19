@@ -64,6 +64,7 @@ def save_session(
     summary: Optional[str],
     short_term_memory: Optional[dict] = None,
     products: Optional[dict] = None,
+    recommendations: Optional[list] = None,
     *,
     identity: SessionIdentity | None = None,
 ) -> None:
@@ -71,6 +72,7 @@ def save_session(
 
     messages 是工作历史（未压缩部分；已压缩段以 summary 承载）；
     products 是商品记忆（mentioned-products，跨压缩累积）；
+    recommendations 是右侧推荐卡片快照（编号随会话稳定）；
     short_term_memory 为短期记忆的序列化数据（第7期）。
     """
     if not _valid_state(messages, summary, products or {}):
@@ -85,6 +87,7 @@ def save_session(
         "summary": summary,
         "messages": messages,
         "products": products or {},
+        "recommendations": recommendations or [],
         "short_term_memory": short_term_memory,
     }
     if identity is not None:

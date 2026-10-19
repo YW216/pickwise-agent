@@ -29,6 +29,7 @@ class ContextPack:
     memory_sections: list[dict]  # MemoryManager.build_memory_prompt_sections()
     skill_catalog: str           # SkillManager.build_catalog_prompt()，可为 ""
     product_block: str = ""      # 商品记忆渲染块（product_tracker.format_products_block），可为 ""
+    selected_products: str = ""  # 当前请求选中的商品；只进模型上下文，不落用户消息
 
 
 def build_working_messages(pack: ContextPack, cfg: dict, mode: str) -> list[dict]:
@@ -58,6 +59,14 @@ def build_working_messages(pack: ContextPack, cfg: dict, mode: str) -> list[dict
             "content": (
                 "以下是本会话提及过的商品记录（商品 ID、名称与提及当时的价格，"
                 f"价格为历史价、不代表现价）：\n{pack.product_block}"
+            ),
+        })
+    if pack.selected_products:
+        messages.append({
+            "role": "system",
+            "content": (
+                "用户刚刚从推荐列表中选中了以下商品。请优先使用这些商品进行详情查询或对比，"
+                "不要把内部 ID 直接展示给用户：\n" + pack.selected_products
             ),
         })
     messages.extend(_project_history(pack.history, cfg.get("tools") or ()))

@@ -1,5 +1,6 @@
 import type { ChatStreamEvent, ExecutionDetail, ExecutionPhase, PhaseState } from '../types/chat'
 import type { SessionSummary, VisibleMessage } from '../types/session'
+import type { RecommendedProduct } from '../types/product'
 
 export interface ChatState {
   sessions: SessionSummary[]
@@ -10,6 +11,8 @@ export interface ChatState {
   streaming: boolean
   execution: ExecutionPhase[]
   error: string | null
+  recommendations: RecommendedProduct[]
+  selectedRefs: string[]
 }
 
 export const initialChatState: ChatState = {
@@ -21,15 +24,18 @@ export const initialChatState: ChatState = {
   streaming: false,
   execution: [],
   error: null,
+  recommendations: [],
+  selectedRefs: [],
 }
 
 type Action =
   | { type: 'INITIALIZED' }
   | { type: 'SESSIONS_LOADED'; sessions: SessionSummary[] }
   | { type: 'SESSION_SELECTED'; sessionId: string }
-  | { type: 'MESSAGES_LOADED'; messages: VisibleMessage[] }
+  | { type: 'MESSAGES_LOADED'; messages: VisibleMessage[]; recommendations: RecommendedProduct[] }
   | { type: 'STREAM_STARTED'; message: string }
   | { type: 'STREAM_EVENT'; event: ChatStreamEvent }
+  | { type: 'TOGGLE_COMPARE'; ref: string }
   | { type: 'STREAM_STOPPED'; message: string }
   | { type: 'ERROR'; message: string }
   | { type: 'CLEAR_ERROR' }
@@ -50,6 +56,28 @@ function text(data: Record<string, unknown>, key: string, fallback = ''): string
 function number(data: Record<string, unknown>, key: string): number | undefined {
   const value = data[key]
   return typeof value === 'number' ? value : undefined
+}
+
+function normalizeProducts(items: unknown[]): RecommendedProduct[] {
+  return items.filter((item): item is RecommendedProduct => {
+    if (!item || typeof item !== 'object') return false
+    const value = item as Record<string, unknown>
+    return typeof value.ref === 'string' && typeof value.display_no === 'number'
+      && typeof value.name === 'string'
+  }).map((item) => ({
+    ref: String(item.ref),
+    display_no: Number(item.display_no),
+    name: String(item.name),
+    brand: String(item.brand || ''),
+    category: String(item.category || '商品'),
+    price: Number(item.price || 0),
+    summary: String(item.summary || ''),
+    reason: String(item.reason || '本轮回答中提到'),
+  }))
+}
+
+function recommendations(data: Record<string, unknown>): RecommendedProduct[] {
+  return Array.isArray(data.products) ? normalizeProducts(data.products) : []
 }
 
 function phaseFor(data: Record<string, unknown>): string {
@@ -134,9 +162,9 @@ export function chatReducer(state: ChatState, action: Action): ChatState {
     case 'SESSIONS_LOADED':
       return { ...state, sessions: action.sessions }
     case 'SESSION_SELECTED':
-      return { ...state, currentSessionId: action.sessionId, messages: [], execution: [], loading: true, error: null }
+      return { ...state, currentSessionId: action.sessionId, messages: [], execution: [], recommendations: [], selectedRefs: [], loading: true, error: null }
     case 'MESSAGES_LOADED':
-      return { ...state, messages: action.messages, loading: false, error: null }
+      return { ...state, messages: action.messages, recommendations: action.recommendations, loading: false, error: null }
     case 'STREAM_STARTED':
       return {
         ...state,
@@ -147,10 +175,19 @@ export function chatReducer(state: ChatState, action: Action): ChatState {
         ],
         streaming: true,
         execution: [],
+        selectedRefs: [],
         error: null,
       }
     case 'STREAM_EVENT': {
       const { event, data } = action.event
+      if (event === 'recommendations') {
+        const incoming = recommendations(data)
+        const incomingRefs = new Set(incoming.map((item) => item.ref))
+        return {
+          ...state,
+          recommendations: [...incoming, ...state.recommendations.filter((item) => !incomingRefs.has(item.ref))],
+        }
+      }
       if (event === 'answer.delta') {
         return {
           ...state,
@@ -171,6 +208,12 @@ export function chatReducer(state: ChatState, action: Action): ChatState {
         return { ...state, streaming: false, error: text(data, 'message', '本轮处理失败') }
       }
       return { ...state, execution: updateExecution(state.execution, action.event) }
+    }
+    case 'TOGGLE_COMPARE': {
+      const selected = state.selectedRefs.includes(action.ref)
+        ? state.selectedRefs.filter((ref) => ref !== action.ref)
+        : state.selectedRefs.length < 4 ? [...state.selectedRefs, action.ref] : state.selectedRefs
+      return { ...state, selectedRefs: selected }
     }
     case 'STREAM_STOPPED':
       return { ...state, streaming: false, error: action.message }

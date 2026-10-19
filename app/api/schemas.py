@@ -24,6 +24,7 @@ class ChatRequest(BaseModel):
 
     session_id: str = Field(min_length=36, max_length=36)
     message: str = Field(min_length=1, max_length=8000)
+    product_refs: list[str] = Field(default_factory=list, max_length=4)
 
     @field_validator("message")
     @classmethod

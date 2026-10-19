@@ -4,6 +4,8 @@ import type { ChatStreamEvent } from '../types/chat'
 export interface ChatRequest {
   session_id: string
   message: string
+  /** 右侧推荐区的选中引用；服务端凭此还原 product_id，前端不接触内部 ID。 */
+  product_refs?: string[]
 }
 
 export type StreamEventHandler = (event: ChatStreamEvent) => void
