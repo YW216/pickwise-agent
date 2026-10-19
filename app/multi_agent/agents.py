@@ -3,6 +3,10 @@
 SubAgent 封装了一个轻量级 ReAct 循环，由 Orchestrator 调度执行。
 """
 
+import asyncio
+import json
+from uuid import uuid4
+
 from openai import OpenAI
 
 from app.agent.context_budget import (
@@ -13,6 +17,7 @@ from app.agent.context_budget import (
     tool_result_view,
 )
 from app.agent.tools.manager import ToolManager
+from app.services.chat_events import emit
 from app.prompts.agents import (
     CONSULT_MULTI_PROMPT,
     CONSULT_PROMPT,
@@ -73,6 +78,8 @@ class SubAgent:
 
     async def handle(
         self, messages: list[dict], max_steps: int = 5,
+        events: asyncio.Queue | None = None,
+        agent_key: str | None = None,
     ) -> tuple[str, list[dict]]:
         """执行 ReAct 循环，返回 (最终文本, 新增消息列表)。
 
@@ -146,12 +153,31 @@ class SubAgent:
                 # 连"参数是坏 JSON"这种情形也能如实显示。
                 # 阶段三：异步工具入口——async 工具直接 await，
                 # 同步工具在 to_thread 中执行，等待期间不阻塞事件循环
-                result_str = await self.tool_manager.aexecute_call_as_message(
-                    tc.function.name, tc.function.arguments, seen,
-                )
+                # 同一工具可能被多个专家、多个轮次调用，不能只用工具名配对。
+                call_id = uuid4().hex
+                tool_info = {"agent": agent_key or self.name,
+                             "tool": tc.function.name, "call_id": call_id}
+                emit(events, "tool.started", **tool_info,
+                     message=_tool_message(tc.function.name))
+                try:
+                    result_str = await self.tool_manager.aexecute_call_as_message(
+                        tc.function.name, tc.function.arguments, seen,
+                    )
+                except Exception:
+                    emit(events, "tool.failed", **tool_info, message="工具执行失败")
+                    raise
                 
                 self._print_action(tc.function.name, tc.function.arguments)
                 self._print_observation(result_str)
+
+                if events is not None:
+                    succeeded, summary, count = _tool_summary(
+                        tc.function.name, result_str,
+                    )
+                    event_name = "tool.finished" if succeeded else "tool.failed"
+                    state = "done" if succeeded else "partial"
+                    emit(events, event_name, **tool_info, state=state,
+                         message=summary, summary=summary, count=count)
 
                 # 入库即截断：存下来的就是模型看到的（单一真相）。
                 # 不再"全量入账 + 发送前另做一份视图"，两者也就不会再漂移。
@@ -218,3 +244,55 @@ class SubAgent:
     def _print_observation(self, result: str) -> None:
         display = result if len(result) <= 300 else result[:300] + "..."
         print(f"  📋 [{self.name}·工具结果] {display}")
+
+
+def _tool_message(tool_name: str) -> str:
+    labels = {
+        "search_products": "正在搜索商品",
+        "search_catalog": "正在筛选商品目录",
+        "retrieve_knowledge": "正在查询知识库",
+        "get_detail": "正在查询商品详情",
+        "compare_products": "正在对比商品",
+        "get_user_favorites": "正在读取收藏夹",
+        "recall_user_memory": "正在查询选购偏好",
+        "load_skill": "正在准备处理流程",
+    }
+    return labels.get(tool_name, "正在执行查询")
+
+
+def _tool_summary(tool_name: str, result: str) -> tuple[bool, str, int | None]:
+    names = {
+        "search_products": "商品",
+        "search_catalog": "商品",
+        "retrieve_knowledge": "资料",
+        "get_user_favorites": "收藏商品",
+        "compare_products": "商品",
+    }
+    try:
+        payload = json.loads(result)
+        if not isinstance(payload, dict):
+            return False, "返回结果格式异常，已跳过本次查询", None
+        data = payload.get("data") or {}
+        fields = {
+            "search_products": ("results", "款商品"),
+            "search_catalog": ("candidates", "款商品"),
+            "retrieve_knowledge": ("results", "条资料"),
+            "get_user_favorites": ("favorites", "款收藏商品"),
+            "compare_products": ("products", "款对比商品"),
+        }
+        if tool_name in fields and isinstance(data, dict):
+            key, unit = fields[tool_name]
+            values = data.get(key)
+            if isinstance(values, list):
+                if not values:
+                    return False, f"暂未找到匹配的{names.get(tool_name, '结果')}，已继续分析", 0
+                return True, f"找到 {len(values)} {unit}", len(values)
+        if tool_name == "get_detail" and isinstance(data.get("product"), dict):
+            name = data["product"].get("name") or "目标商品"
+            return True, f"已获取「{name}」的详细参数", None
+        if payload.get("success") is True:
+            return True, "查询完成", None
+        reason = payload.get("error") or "服务暂时不可用"
+        return False, f"{reason}，已跳过本次查询", None
+    except (TypeError, ValueError):
+        return False, "返回结果格式异常，已跳过本次查询", None

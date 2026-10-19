@@ -198,10 +198,13 @@ def _build_app(*, secret: str, session_dir: str | Path,
             or PostgresIdempotencyStore(settings.database_url)
         )
         app.state.dependency_probe = DependencyProbe()
+        app.state.stream_tasks = set()
         await app.state.session_manager.start_cleanup_loop()
         try:
             yield
         finally:
+            if app.state.stream_tasks:
+                await asyncio.gather(*app.state.stream_tasks, return_exceptions=True)
             # 退出逆序：SessionManager（排空并逐窗口保存关闭）→ 异步基础层 → 执行器 → 公共客户端
             await app.state.session_manager.close()
             await app.state.async_runtime.aclose()

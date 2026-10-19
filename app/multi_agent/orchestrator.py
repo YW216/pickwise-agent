@@ -13,6 +13,8 @@ from dataclasses import replace
 from typing import Optional
 
 import asyncio
+from uuid import uuid4
+from app.services.chat_events import emit
 
 #from openai import OpenAI
 from langfuse.openai import AsyncOpenAI
@@ -168,7 +170,7 @@ class MultiAgentOrchestrator:
     def history_size(self) -> int:
         return len(self.raw_messages)
 
-    async def chat(self, user_input: str) -> str:
+    async def chat(self, user_input: str, events: asyncio.Queue | None = None) -> str:
         """主答复与附属工作分离：失败保留用户消息，成功答案不被记忆/落盘覆盖。
 
         入口拒绝不写历史；已入账的失败轮只补一次最终回复。
@@ -186,7 +188,9 @@ class MultiAgentOrchestrator:
                 )
             self.raw_messages.append({"role": "user", "content": user_input})
             turn_started = True
-            reply = await self._chat_inner(user_input)
+            reply = await self._chat_inner(
+                user_input, **({"events": events} if events is not None else {}),
+            )
             completed = True
         except Exception as exc:  # 最外层保护用户体验；错误不靠静默吞掉处理
             reply = self._on_failure(user_input, exc)
@@ -248,7 +252,9 @@ class MultiAgentOrchestrator:
                 return key
         return None
 
-    async def _chat_inner(self, user_input: str) -> str:
+    async def _chat_inner(
+        self, user_input: str, events: asyncio.Queue | None = None,
+    ) -> str:
         """只完成路由、专家执行和最终回复提交；记忆/持久化在 chat 外层处理。"""
         pack = self._build_pack()
         # 压缩只针对专家 Agent 的上下文预算（_estimate_context_tokens 估的是
@@ -268,6 +274,8 @@ class MultiAgentOrchestrator:
         # （收紧最近条数/摘要长度），而不是拿专家上下文间接补救。
         #
         # SDK 已负责 HTTP 层重试，这里不再叠加传输重试，只做瞬时故障降级。
+        emit(events, "status", stage="routing", state="running",
+             message="正在识别预算、使用场景和关注重点")
         try:
             scenarios = await self.router.route(user_input, pack.history, summary=pack.summary)
         except Exception as exc:
@@ -277,11 +285,16 @@ class MultiAgentOrchestrator:
                 scenarios = [DEFAULT_SCENARIO]
             else:
                 raise
+        emit(events, "status", stage="routing", state="done",
+             message="已完成需求分析，开始匹配商品和资料")
         mode = "single" if len(scenarios) == 1 else "multi"
         names = "、".join(AGENT_CONFIGS[k]["name"] for k in scenarios)
         print(f"\n🔀 [路由] → {names}（场景: {', '.join(scenarios)}，模式: {mode}）")
 
-        entries = await self._execute_agents(scenarios, pack, mode)
+        entries = await self._execute_agents(
+            scenarios, pack, mode,
+            **({"events": events} if events is not None else {}),
+        )
         for entry in entries:
             if entry.status == "failed":
                 self.last_failures.append({
@@ -299,7 +312,11 @@ class MultiAgentOrchestrator:
             reply = entry.new_messages[-1]["content"]
             self.raw_messages.extend(entry.new_messages)
         else:
+            emit(events, "status", stage="result", state="running",
+                 message="正在综合商品信息和选购资料")
             reply = await self._run_result_agent(entries, user_input)
+            emit(events, "status", stage="result", state="done",
+                 message="已完成候选商品比较，正在生成建议")
             # full 档合并：各 Agent 工具消息对原样存档（[:-1]，成对约束天然满足），
             # Result 整合文本永远最后一条（设计文档 10.4）
             for entry in entries:
@@ -383,7 +400,7 @@ class MultiAgentOrchestrator:
 
     async def _execute_agents(
         self, scenarios: list[str], pack: ContextPack, mode: str,
-        retry: bool = True,
+        retry: bool = True, events: asyncio.Queue | None = None,
     ) -> list[BlackboardEntry]:
         """线程池并行执行场景 Agent，返回黑板条目（按固定顺序）。
 
@@ -398,12 +415,22 @@ class MultiAgentOrchestrator:
 
         async def run(key: str) -> BlackboardEntry:
             agent = self.agents[key]
+            step_id = f"agent:{key}:{uuid4().hex}"
+            agent_message = (
+                "正在根据预算和使用场景筛选商品"
+                if key == "presale" else "正在查询相关选购资料"
+            )
+            emit(events, "status", stage=step_id, agent=key, state="running",
+                 message=agent_message)
             # 技能目录按 Agent 归属过滤（pack 共享只读，per-agent 目录用轻量副本注入）
             agent_pack = replace(pack, skill_catalog=self._skill_catalog_for(key))
             try:
                 messages = build_working_messages(agent_pack, AGENT_CONFIGS[key], mode)
 
-                _, new_messages = await agent.handle(messages, max_steps=self.max_react_steps)
+                _, new_messages = await agent.handle(
+                    messages, max_steps=self.max_react_steps,
+                    **({"events": events, "agent_key": key} if events is not None else {}),
+                )
                 if (
                     not new_messages
                     or new_messages[-1].get("role") != "assistant"
@@ -412,16 +439,23 @@ class MultiAgentOrchestrator:
                     or not new_messages[-1]["content"].strip()
                 ):
                     raise ValueError("专家未返回有效的最终答复")
+                emit(events, "status", stage=step_id, agent=key, state="done",
+                     message=("商品筛选完成" if key == "presale" else "资料查询完成"))
                 return BlackboardEntry(
                     agent=key, status="success", error=None,
                     new_messages=new_messages,
                 )
             except ContextOverflowError as exc:
+                emit(events, "status", stage=step_id, agent=key, state="failed",
+                     message="上下文过长，正在尝试压缩")
                 return BlackboardEntry(
                     agent=key, status="overflow", error=str(exc), new_messages=[],
                     error_type=type(exc).__name__,
                 )
             except Exception as e:  # 宽捕获：失败进黑板，不中断其余 Agent
+                emit(events, "status", stage=step_id, agent=key, state="failed",
+                     message=("商品筛选暂时未完成" if key == "presale"
+                              else "资料查询暂时未完成"))
                 return BlackboardEntry(
                     agent=key, status="failed", error=str(e), new_messages=[],
                     error_type=type(e).__name__,
@@ -443,6 +477,7 @@ class MultiAgentOrchestrator:
             if await self._try_compact(pack, force=True):
                 for entry in await self._execute_agents(
                     overflow, self._build_pack(), mode, retry=False,
+                    **({"events": events} if events is not None else {}),
                 ):
                     results[entry.agent] = entry
         for entry in results.values():

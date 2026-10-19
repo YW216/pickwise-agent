@@ -88,7 +88,6 @@ async def retrieve_knowledge(query: str, top_k: int = 3, *, rerank: bool = False
     if rerank and hits:
         # cross-encoder 精排（阶段六后续）：按 query-doc 相关度重排，压噪声
         from app.agent.rag.reranker import Reranker
-        from app.config.settings import settings
         reranker = Reranker(
             api_key=settings.effective_rerank_api_key,
             base_url=settings.effective_rerank_base_url,

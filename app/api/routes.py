@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.agent.tools.catalog import search_catalog
 from app.agent.tools.detail import compare_products, get_detail
@@ -268,6 +270,23 @@ async def chat(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """聊天：支持 Idempotency-Key，防止客户端重试重复执行 Agent。"""
+    return await _handle_chat(body, request, user, manager, idempotency_key)
+
+
+@chat_router.post("/stream")
+async def chat_stream(
+    body: ChatRequest,
+    request: Request,
+    user: AnonymousIdentity = Depends(require_csrf),
+    manager: SessionManager = Depends(get_session_manager),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    """过程实时 SSE；答案生成并保存后分段发送，不是模型 Token 流式。"""
+    return await _handle_chat(body, request, user, manager, idempotency_key, stream=True)
+
+
+async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=False):
+    """两个 HTTP 入口共用鉴权后的幂等检查、执行与结果映射。"""
     request_id = new_request_id()
     identity = _identity_for(user, body.session_id)
 
@@ -317,22 +336,57 @@ async def chat(
                 content=claim.response or {},
             )
             response.headers["X-Idempotent-Replay"] = "true"
+            if stream and response.status_code < 400:
+                return StreamingResponse(
+                    _answer_events(claim.response, replayed=True),
+                    media_type="text/event-stream", headers=_SSE_HEADERS,
+                )
             return response
 
-    try:
-        outcome = await manager.chat(identity, body.message)
-    except SessionManagerError as exc:
-        response = session_error(exc, request_id)
-    except Exception:
-        response = error(
-            500,
-            "CHAT_INTERNAL_ERROR",
-            "服务内部错误，请稍后重试",
-            request_id,
-        )
-    else:
-        response = _chat_response(identity, outcome, request_id)
+    events = asyncio.Queue(maxsize=256) if stream else None
+    execution = None
+    if stream:
+        try:
+            execution = await manager.chat_stream(identity, body.message, events)
+        except SessionManagerError as exc:
+            response = session_error(exc, request_id)
+            return await _finish_chat(request, identity, idempotency_key, request_hash, response)
+        except Exception:
+            response = error(503, "CHAT_UNAVAILABLE", "会话服务暂时不可用", request_id)
+            return await _finish_chat(request, identity, idempotency_key, request_hash, response)
 
+    async def run():
+        try:
+            outcome = await execution if execution is not None else await manager.chat(identity, body.message)
+        except SessionManagerError as exc:
+            response = session_error(exc, request_id)
+        except Exception:
+            response = error(500, "CHAT_INTERNAL_ERROR", "服务内部错误，请稍后重试", request_id)
+        else:
+            response = _chat_response(identity, outcome, request_id)
+        response = await _finish_chat(
+            request, identity, idempotency_key, request_hash, response,
+        )
+        if stream:
+            # 明确告诉 SSE 生成器：执行和幂等记账都结束了。
+            while events.full():
+                events.get_nowait()
+            events.put_nowait(None)
+        return response
+
+    if not stream:
+        return await run()
+
+    # 独立任务保证浏览器断连只停止传输，生成、保存和幂等记账仍继续。
+    task = asyncio.create_task(run())
+    request.app.state.stream_tasks.add(task)
+    task.add_done_callback(request.app.state.stream_tasks.discard)
+    return StreamingResponse(
+        _stream_events(events, task), media_type="text/event-stream", headers=_SSE_HEADERS,
+    )
+
+
+async def _finish_chat(request, identity, idempotency_key, request_hash, response):
     if idempotency_key is not None and request_hash is not None:
         try:
             payload = json.loads(response.body.decode("utf-8"))
@@ -350,6 +404,58 @@ async def chat(
             # 对客户端保留本次结果，并明确标注账本未写入。
             response.headers["X-Idempotency-Persisted"] = "false"
     return response
+
+
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+_HEARTBEAT_SECONDS = 15.0
+
+
+def _sse(event, data):
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def _answer_events(payload, *, replayed=False):
+    data = payload.get("data") or {}
+    reply = data.get("reply", "")
+    # 保留标点和换行；超长段落继续按 80 字切分，拼接必须与原文完全一致。
+    chunks = re.findall(r"[^。！？\n]{1,80}[。！？\n]?|[。！？\n]", reply)
+    for seq, text in enumerate(chunks):
+        yield _sse("answer.delta", {"text": text, "seq": seq})
+        await asyncio.sleep(0)
+    if payload.get("success") is not True:
+        failure = payload.get("error") or {}
+        yield _sse("error", {**failure, "request_id": payload.get("request_id")})
+    yield _sse("done", {**data, "request_id": payload.get("request_id"),
+                        "failed": payload.get("success") is not True,
+                        "replayed": replayed})
+
+
+async def _stream_events(events, task):
+    pending = asyncio.create_task(events.get())
+    try:
+        while True:
+            ready, _ = await asyncio.wait(
+                {pending, task}, timeout=_HEARTBEAT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not ready:
+                yield ": ping\n\n"
+            elif pending in ready:
+                event = pending.result()
+                if event is None:
+                    break
+                yield _sse(event["event"], event["data"])
+                pending = asyncio.create_task(events.get())
+        response = task.result()
+        payload = json.loads(response.body)
+        if response.headers.get("X-Idempotency-Persisted") == "false":
+            payload.setdefault("data", {}).setdefault("warnings", []).append("IDEMPOTENCY_PERSISTENCE_FAILED")
+        async for frame in _answer_events(payload):
+            yield frame
+    finally:
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        # 不取消 task：它还需要保存结果；事件队列有界，断连不会无限堆积。
 
 
 def _identity_for(user: AnonymousIdentity, session_id: str) -> SessionIdentity:

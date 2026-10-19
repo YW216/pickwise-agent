@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import inspect
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,7 @@ from app.agent.storage import load_session, save_session
 from app.identity import SessionIdentity, SessionOwnershipError, validate_user_id
 from app.services.session_service import SessionService, SessionServiceNotFound
 from app.services.session_store import SessionMessage, SessionState
+from app.services.chat_events import emit
 
 
 class SessionManagerError(Exception):
@@ -226,6 +228,21 @@ class SessionManager:
         entry.save_failed = not outcome.persisted
         return outcome
 
+    async def chat_stream(
+        self, identity: SessionIdentity, message: str,
+        events: asyncio.Queue,
+    ) -> asyncio.Task:
+        """先占用会话，再返回执行任务；HTTP 开流前即可返回 404/429。"""
+        entry = await self._ensure_entry(identity)
+        self._check_admittable(entry)
+        if entry.busy:
+            raise SessionBusy("窗口正在处理上一条消息，请稍后再试")
+        entry.busy = True
+        return asyncio.create_task(self._run_serialized(
+            entry, lambda _agent: self._chat_entry(entry, message, events),
+            reserved=True,
+        ))
+
     async def delete_session(self, identity: SessionIdentity) -> None:
         """关闭当前进程中的 Agent 后删除持久化会话。"""
         self._check_open()
@@ -260,6 +277,7 @@ class SessionManager:
 
     async def _run_serialized(
         self, entry: _Entry, operation: Callable[[Any], Any],
+        *, reserved: bool = False,
     ) -> Any:
         """chat 专用闸口：busy 同步"检查并占用"，忙时立即拒绝，不排队。
 
@@ -268,11 +286,12 @@ class SessionManager:
         导致新请求被迫挂起排队）。窗口锁仍保留，用于与 close/cleanup
         的回收路径互斥；不同窗口的锁互不相同，因此可并行。
         """
-        if entry.closing:
-            raise SessionClosing("窗口正在关闭，请稍后重试")
-        if entry.busy:
-            raise SessionBusy("窗口正在处理上一条消息，请稍后再试")
-        entry.busy = True
+        if not reserved:
+            if entry.closing:
+                raise SessionClosing("窗口正在关闭，请稍后重试")
+            if entry.busy:
+                raise SessionBusy("窗口正在处理上一条消息，请稍后再试")
+            entry.busy = True
         try:
             async with entry.lock:
                 # 拿锁期间，窗口可能已经开始关闭。
@@ -300,8 +319,25 @@ class SessionManager:
         finally:
             entry.busy = False
 
-    async def _chat_agent(self, agent: Any, message: str) -> ChatOutcome:
-        reply = await agent.chat(message)
+    async def _chat_agent(
+        self, agent: Any, message: str, events: asyncio.Queue | None = None,
+    ) -> ChatOutcome:
+        chat = agent.chat
+        supports_events = False
+        if events is not None:
+            try:
+                signature = inspect.signature(chat)
+                supports_events = (
+                    "events" in signature.parameters
+                    or any(item.kind == inspect.Parameter.VAR_KEYWORD
+                           for item in signature.parameters.values())
+                )
+            except (TypeError, ValueError):
+                supports_events = False
+        reply = await chat(
+            message,
+            **({"events": events} if events is not None and supports_events else {}),
+        )
         failures = list(getattr(agent, "last_failures", []))
         failed = any(item.get("affects_answer") for item in failures)
         persisted = not any(item.get("stage") == "persistence" for item in failures)
@@ -318,20 +354,27 @@ class SessionManager:
             warnings=tuple(warnings),
         )
 
-    async def _chat_entry(self, entry: _Entry, message: str) -> ChatOutcome:
-        outcome = await self._chat_agent(entry.agent, message)
+    async def _chat_entry(
+        self, entry: _Entry, message: str, events: asyncio.Queue | None = None,
+    ) -> ChatOutcome:
+        outcome = await self._chat_agent(entry.agent, message, events)
         if self._session_service is None:
+            entry.save_failed = not outcome.persisted
             return outcome
+        emit(events, "status", stage="save", state="running", message="正在保存会话")
         try:
             entry.state = await self._persist_agent_state(entry)
         except Exception:
             entry.save_failed = True
+            emit(events, "status", stage="save", state="failed", message="会话未保存")
             return ChatOutcome(
                 reply=outcome.reply,
                 failed=outcome.failed,
                 persisted=False,
-                warnings=(*outcome.warnings, "PERSISTENCE_FAILED"),
+                warnings=outcome.warnings,
             )
+        entry.save_failed = False
+        emit(events, "status", stage="save", state="done", message="会话已保存")
         return outcome
 
     async def _persist_agent_state(self, entry: _Entry) -> SessionState:

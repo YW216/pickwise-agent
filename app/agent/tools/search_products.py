@@ -235,7 +235,6 @@ async def search_products(
             # cross-encoder 精排（阶段六后续）：把 query 与候选卡片文本配对
             # 打分重排，压掉 RRF 无法分辨的关键词噪声 → Prec/MRR 提升
             from app.agent.rag.reranker import Reranker
-            from app.config.settings import settings
             reranker = Reranker(
                 api_key=settings.effective_rerank_api_key,
                 base_url=settings.effective_rerank_base_url,
@@ -250,10 +249,11 @@ async def search_products(
             results = [candidates[i] for i in order]
         else:
             results = candidates
-    except ConnectionError as exc:
-        return fail(str(exc), {"results": [], "total": 0, "unavailable": True})
-    except Exception as exc:  # noqa: BLE001
-        return fail(f"商品语义检索暂时不可用: {exc}",
+    except ConnectionError:
+        return fail("商品语义检索暂时不可用，请稍后再试",
+                    {"results": [], "total": 0, "unavailable": True})
+    except Exception:  # noqa: BLE001
+        return fail("商品语义检索暂时不可用，请稍后再试",
                     {"results": [], "total": 0, "unavailable": True})
 
     if not results:

@@ -44,7 +44,9 @@
               required
             ></textarea>
             <div class="composer-footer">
-              <span class="hint">Enter 发送，Shift + Enter 换行</span>
+              <button id="stop-button" class="button button-secondary" type="button" hidden>
+                停止接收
+              </button>
               <button id="send-button" class="button button-primary" type="submit">
                 发送 <span aria-hidden="true">↗</span>
               </button>
@@ -72,6 +74,6 @@
         </aside>
       </section>
     </main>
-    <script src="/app.js" defer></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>
