@@ -55,7 +55,7 @@ class VisibleMessage:
 
 @dataclass(frozen=True)
 class SessionSummary:
-    """会话列表使用的轻量摘要，不包含完整消息。"""
+    """会话列表摘要；message_count 只统计前端可见消息，不含工具轨迹。"""
 
     user_id: str
     session_id: str
@@ -146,7 +146,11 @@ def visible_messages(
                     created_at=message.created_at,
                 )
             )
-        elif message.role == "assistant" and message.content.strip():
+        elif (
+            message.role == "assistant"
+            and message.content.strip()
+            and not message.metadata.get("tool_calls")
+        ):
             visible.append(
                 VisibleMessage(
                     session_id=session_id,

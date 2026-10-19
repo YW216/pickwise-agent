@@ -32,7 +32,7 @@ export function SessionList({ sessions, currentSessionId, disabled, onCreate, on
         {groups.filter((group) => group.sessions.length > 0).map((group) => <div key={group.name}><h2 className="session-group">{group.name}</h2>{group.sessions.map((session) => (
           <div className={`session-item ${session.session_id === currentSessionId ? 'is-active' : ''}`} key={session.session_id}>
             <button className="session-select" type="button" disabled={disabled} aria-current={session.session_id === currentSessionId ? 'page' : undefined} onClick={() => onSelect(session.session_id)} title={session.title || '新会话'}>
-              <strong>{session.title || '新会话'}</strong><span>{session.message_count} 条消息</span>
+              <strong>{session.title || '新会话'}</strong><span>{session.message_count} 条可见消息</span>
             </button>
             <button className="session-delete icon-button" type="button" disabled={disabled} onClick={() => onDelete(session.session_id)} aria-label={`删除${session.title || '会话'}`} title="删除会话"><Trash size={14} aria-hidden="true" /></button>
           </div>

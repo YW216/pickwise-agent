@@ -56,13 +56,25 @@ class PostgresSessionStore:
         return state
 
     async def list_sessions(self, user_id: str) -> list[SessionSummary]:
+        """统计口径与 visible_messages 一致，避免工具轨迹抬高消息数。"""
         pool = await _pool_for(self._database_url)
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
                     SELECT user_id, session_id, title, status,
-                           jsonb_array_length(messages)::integer AS message_count,
+                           (
+                               SELECT count(*)::integer
+                               FROM jsonb_array_elements(messages) AS item
+                               WHERE item->>'role' = 'user'
+                                  OR (
+                                      item->>'role' = 'assistant'
+                                      AND COALESCE(item->>'content', '') ~ '[^[:space:]]'
+                                      AND COALESCE(
+                                          item->'metadata'->'tool_calls', 'null'::jsonb
+                                      ) IN ('null'::jsonb, '[]'::jsonb)
+                                  )
+                           ) AS message_count,
                            created_at, updated_at, last_message_at
                     FROM sessions
                     WHERE user_id = %s
