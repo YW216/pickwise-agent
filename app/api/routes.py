@@ -42,8 +42,14 @@ from app.config.settings import settings
 from app.db.catalog_repo import aget_products_by_ids
 from app.identity import SessionIdentity
 from app.services.idempotency import hash_request, validate_idempotency_key
+from app.services.product_images import category_image, product_image
 from app.services.product_refs import resolve_product_context, resolve_product_ref
-from app.services.recommendations import public_cards, restore_cards
+from app.services.recommendations import (
+    build_recommendations,
+    merge_recommendations,
+    public_cards,
+    restore_cards,
+)
 from app.services.session_store import visible_messages
 from app.services.session_manager import (
     ChatOutcome,
@@ -190,8 +196,43 @@ async def list_sessions(
     )
 
 
+async def _refresh_recommendations(state, user_id: str, session_id: str) -> list[dict]:
+    """用最后一轮回复重算卡片，与快照合并后返回。
+
+    快照可能落后于展示口径（例如早期版本截断到 8 款）；读取时按当前规则
+    重算一次，既补齐漏掉的商品，也保留历史轮次出现过的卡片。
+    编号通过 restore_cards 预先注册，重算不会打乱用户已经记住的 #01/#02。
+    """
+    cards = restore_cards(state.recommendations, user_id=user_id, session_id=session_id)
+    reply = ""
+    for message in reversed(state.messages):
+        if message.role == "assistant" and str(message.content or "").strip():
+            reply = str(message.content)
+            break
+    if not reply:
+        return cards
+    tools = [
+        {"role": "tool", "content": message.content}
+        for message in state.messages if message.role == "tool"
+    ]
+    fresh = await build_recommendations(
+        reply, tools,
+        user_id=user_id,
+        session_id=session_id,
+        database_url=settings.database_url,
+    )
+    return merge_recommendations(fresh, cards) if fresh else cards
+
+
 async def _with_catalog_prices(cards: list[dict]) -> list[dict]:
-    """历史卡片缺价时回查目录：快照记的是"当时写了什么"，价格要能补上。"""
+    """历史卡片补齐：缺图按品类补，缺价回查目录。
+
+    快照记的是"当时写了什么"，图与价都是可推导的展示字段，
+    读取时补上，历史会话也能和当前 UI 一致。
+    """
+    for card in cards:
+        if not card.get("image"):
+            card["image"] = category_image(str(card.get("category") or ""))
     missing = [
         card["product_id"] for card in cards
         if card.get("product_id") and card.get("price") in (None, "", 0)
@@ -225,7 +266,9 @@ async def session_messages(
     except SessionServiceNotFound:
         return error(404, "SESSION_NOT_FOUND", "会话不存在", request_id)
     messages = visible_messages(state.messages, session_id=state.session_id)
-    recommendations = await _with_catalog_prices(list(state.recommendations))
+    recommendations = await _with_catalog_prices(
+        await _refresh_recommendations(state, user.user_id, state.session_id)
+    )
     return success(
         {
             "session_id": session_id,
@@ -647,10 +690,13 @@ def _detail_response(result: dict, request_id: str):
         data = dict(result["data"])
         product = data.get("product")
         if isinstance(product, dict):
+            image = product_image(product)
             data["product"] = {
                 key: value for key, value in product.items()
                 if key != "product_id"
             }
+            if image:
+                data["product"]["image"] = image
         return success(data, request_id)
     if result.get("data", {}).get("unavailable"):
         return error(503, "PRODUCT_SERVICE_UNAVAILABLE",
@@ -687,8 +733,11 @@ def _public_product_data(data: dict) -> dict:
                 public_items.append(item)
                 continue
             public_item = dict(item)
+            image = product_image(item)
             public_item.pop("product_id", None)
             public_item["candidate_no"] = index
+            if image:
+                public_item["image"] = image
             public_items.append(public_item)
         payload[key] = public_items
     return payload

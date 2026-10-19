@@ -248,7 +248,8 @@ async def search_products(
             order = await asyncio.to_thread(reranker.rerank, query, docs, limit)
             results = [candidates[i] for i in order]
         else:
-            results = candidates
+            # 不精排时也必须守住 limit 契约：召回窗口是 4 倍，不能整窗返回。
+            results = candidates[:limit]
     except ConnectionError:
         return fail("商品语义检索暂时不可用，请稍后再试",
                     {"results": [], "total": 0, "unavailable": True})

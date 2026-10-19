@@ -45,13 +45,20 @@ class MemoryManager:
             return
         await self.stm.update(self.client, self.model, recent_messages)
 
-    def build_memory_prompt_sections(self) -> list[dict]:
-        """生成所有记忆相关的 system prompt 消息列表。"""
+    def build_memory_prompt_sections(self, include_long_term: bool = True) -> list[dict]:
+        """生成所有记忆相关的 system prompt 消息列表。
+
+        Args:
+            include_long_term：是否注入长期记忆（跨会话）。会话首轮传 False——
+                新会话开头就带着上一个会话的预算/场景，模型会当成"你已经说过"，
+                直接跳过澄清给出对比（实测 2026-10-19）。首轮从零开始，需要历史
+                偏好时由 Agent 主动调 recall_user_memory 取。
+        """
         if not self.memory_enabled:
             return []
 
         sections = []
-        ltm_section = self.ltm.build_prompt_section()
+        ltm_section = self.ltm.build_prompt_section() if include_long_term else None
         if ltm_section:
             sections.append({"role": "system", "content": ltm_section})
         stm_section = self.stm.build_prompt_section()

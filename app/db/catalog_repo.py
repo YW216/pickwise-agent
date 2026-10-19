@@ -171,12 +171,30 @@ def _rows_to_products(rows) -> dict:
               "specs": specs, "introduction": intro}
         for pid, name, brand, cat, price, specs, intro in rows
     }
-    return {
-        pid: {"product_id": pid, "name": name, "brand": brand,
-              "category": cat, "price": price,
-              "specs": specs, "introduction": intro}
-        for pid, name, brand, cat, price, specs, intro in rows
-    }
+
+
+_SQL_PRODUCT_CARDS = """
+    SELECT product_id, name, brand, category, price, LEFT(introduction->>0, 64)
+    FROM products
+    ORDER BY product_id
+"""
+
+
+async def alist_product_cards(database_url: str) -> list[dict]:
+    """全量轻卡片（约百条），供"回复文本 → 商品"的名字回查使用。
+
+    Agent 有时凭商品记忆回答、本轮并未调用工具，只靠工具结果提取会导致
+    右侧与正文不一致；这里给调用方一份可匹配的名称清单。
+    """
+    async with (await _pool_for(database_url)).connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(_SQL_PRODUCT_CARDS)
+            rows = await cur.fetchall()
+    return [
+        {"product_id": pid, "name": name, "brand": brand, "category": cat,
+         "price": price, "summary": summary}
+        for pid, name, brand, cat, price, summary in rows
+    ]
 
 
 def load_full_catalog(database_url: str) -> dict:

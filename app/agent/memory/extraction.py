@@ -16,6 +16,9 @@ from app.prompts.memory import LTM_EXTRACTION_PROMPT, STM_EXTRACTION_PROMPT
 if TYPE_CHECKING:
     from app.agent.memory.long_term import MemoryFact
 
+# 一次抽取最多沉淀几条画像：长对话容易一次吐出十几条，直接把上限刷满。
+MAX_NEW_FACTS_PER_RUN = 3
+
 
 def _build_transcript(messages: list[dict]) -> str:
     """将消息列表格式化为文本摘要（复用 summarizer 的逻辑）。"""
@@ -89,8 +92,8 @@ async def extract_long_term_facts(
     summary: str | None,
     existing_facts: list,
 ) -> tuple[list[MemoryFact], str]:
-    """从完整会话中提取长期记忆事实 + 交互摘要。"""
-    from app.agent.memory.long_term import MemoryFact
+    """从完整会话中提取用户画像 + 交互摘要（一次最多 MAX_NEW_FACTS_PER_RUN 条）。"""
+    from app.agent.memory.long_term import MemoryFact, PROFILE_SLOTS
 
     parts = []
     if summary:
@@ -104,7 +107,9 @@ async def extract_long_term_facts(
         return [], ""
 
     existing_text = (
-        "\n".join(f"- [{f.category}] {f.content}" for f in existing_facts)
+        "\n".join(
+            f"- [{f.slot}] {f.key} = {_value_text(f.value)}" for f in existing_facts
+        )
         if existing_facts
         else "（暂无）"
     )
@@ -120,22 +125,54 @@ async def extract_long_term_facts(
     )
     raw = response.choices[0].message.content.strip()
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
+    data = _parse_json(raw)
+    if data is None:
         return [], "（提取失败）"
 
-    now = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now().date().isoformat()
     new_facts = []
-    for item in data.get("facts", []):
-        content = item.get("content", "").strip()
-        category = item.get("category", "other")
-        if content:
-            new_facts.append(MemoryFact(
-                content=content,
-                category=category,
-                created_at=now,
-            ))
+    for item in data.get("profile") or []:
+        if not isinstance(item, dict):
+            continue
+        slot = str(item.get("slot", "")).strip()
+        key = str(item.get("key", "")).strip()
+        value = item.get("value", "")
+        if isinstance(value, str):
+            value = value.strip()
+        if isinstance(value, list):
+            value = [str(part).strip() for part in value if str(part).strip()]
+        # 只认固定四类，且 key/value 必须非空——结构不全宁可丢。
+        if slot not in PROFILE_SLOTS or not key or not value:
+            continue
+        new_facts.append(MemoryFact(
+            slot=slot,
+            key=key,
+            value=value,
+            quote=str(item.get("quote", "")).strip(),
+            updated_at=now,
+        ))
+        if len(new_facts) >= MAX_NEW_FACTS_PER_RUN:
+            break  # 一次会话最多沉淀 3 条，防止长对话把画像刷满
 
-    interaction_summary = data.get("interaction_summary", "")
+    interaction_summary = str(data.get("interaction_summary", "") or "").strip()
     return new_facts, interaction_summary
+
+
+def _value_text(value) -> str:
+    return " > ".join(map(str, value)) if isinstance(value, list) else str(value)
+
+
+def _parse_json(raw: str):
+    """容错解析：模型偶尔会包 ```json 代码块或前后带说明。"""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return None

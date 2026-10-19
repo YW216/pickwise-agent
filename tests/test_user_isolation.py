@@ -21,7 +21,8 @@ from app.multi_agent.orchestrator import MultiAgentOrchestrator
 
 
 def fact(content):
-    return MemoryFact(content, "preference", "2026-10-11")
+    """测试用画像条目：key 唯一，值即传入文本。"""
+    return MemoryFact(slot="reject", key=f"测试:{content}", value=content, updated_at="2026-10-11")
 
 
 @pytest.fixture
@@ -58,8 +59,8 @@ def test_second_user_does_not_replace_first_users_tool(create_orchestrator):
     b.memory_manager.stm.facts = ["B 预算 8000"]
     assert recall(a)["data"]["short_term_facts"] == ["A 预算 5000"]
     assert recall(b)["data"]["short_term_facts"] == ["B 预算 8000"]
-    assert recall(a)["data"]["long_term_facts"][0]["content"] == "A 偏好轻薄本"
-    assert recall(b)["data"]["long_term_facts"] == []
+    assert recall(a)["data"]["profile"][0]["value"] == "A 偏好轻薄本"
+    assert recall(b)["data"]["profile"] == []
     disabled = create_orchestrator(memory_enabled=False)
     assert not recall(disabled)["success"]
     assert recall(a)["data"]["short_term_facts"] == ["A 预算 5000"]
@@ -107,7 +108,7 @@ def test_one_users_windows_share_long_term_but_not_short_term(create_orchestrato
     second.memory_manager.stm.facts = ["窗口二预算 8000"]
     a.memory_manager.ltm.add_facts([fact("偏好轻薄本")])
     a.memory_manager.ltm.save()
-    assert recall(second)["data"]["long_term_facts"][0]["content"] == "偏好轻薄本"
+    assert recall(second)["data"]["profile"][0]["value"] == "偏好轻薄本"
     assert recall(second)["data"]["short_term_facts"] == ["窗口二预算 8000"]
     a.raw_messages = [{"role": "user", "content": "窗口一"}]
     second.raw_messages = [{"role": "user", "content": "窗口二"}]
@@ -116,7 +117,7 @@ def test_one_users_windows_share_long_term_but_not_short_term(create_orchestrato
     a.reset()
     assert second.history_size == 1
     assert recall(second)["data"]["short_term_facts"] == ["窗口二预算 8000"]
-    assert recall(second)["data"]["long_term_facts"][0]["content"] == "偏好轻薄本"
+    assert recall(second)["data"]["profile"][0]["value"] == "偏好轻薄本"
 
 
 def test_parallel_consolidation_merges_both_windows_and_refreshes_existing_window(
@@ -137,12 +138,12 @@ def test_parallel_consolidation_merges_both_windows_and_refreshes_existing_windo
     a.summary, second.summary = "窗口一摘要", "窗口二摘要"
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(lambda instance: asyncio.run(instance.close()), [a, second]))
-    facts = recall(a)["data"]["long_term_facts"]
-    assert {item["content"] for item in facts} == {"偏好轻薄本", "希望续航长"}
+    facts = recall(a)["data"]["profile"]
+    assert {item["value"] for item in facts} == {"偏好轻薄本", "希望续航长"}
     assert set(recall(second)["data"]["recent_interactions"]) == {"窗口一摘要", "窗口二摘要"}
-    assert recall(stranger)["data"]["long_term_facts"] == []
+    assert recall(stranger)["data"]["profile"] == []
     restored = create_orchestrator(a.identity)
-    assert {item["content"] for item in recall(restored)["data"]["long_term_facts"]} == {
+    assert {item["value"] for item in recall(restored)["data"]["profile"]} == {
         "偏好轻薄本", "希望续航长",
     }
 
@@ -258,7 +259,7 @@ def test_failed_memory_write_keeps_pending_facts_for_retry(tmp_path, monkeypatch
     memory.save()
     restored = LongTermMemory("user", str(tmp_path))
     restored.load()
-    assert [item.content for item in restored.facts] == ["保留事实"]
+    assert [item.value for item in restored.facts] == ["保留事实"]
 
 
 def test_legacy_cli_paths_and_settings_are_preserved(tmp_path):

@@ -20,29 +20,43 @@ STM_EXTRACTION_PROMPT = """你是对话分析助手。基于下面的电商客�
 - 不要输出编号、不要加多余的解释"""
 
 
-LTM_EXTRACTION_PROMPT = """你是用户画像分析助手。基于以下电商客服对话（可能包含对话摘要），提取值得长期记忆的用户信息。
+LTM_EXTRACTION_PROMPT = """你是 3C 选购助手的用户画像分析助手。从下面的对话里，提取**跨会话仍然有效**的用户画像。
 
-这些信息将在未来的对话中帮助客服更好地服务该用户。
+判断标准只有一句：**下个月还成立吗？换个品类还成立吗？** 两个都成立才记。
 
-用户已有的长期记忆（避免重复）：
-{existing_ltm}
+只允许四个槽位（slot）：
+1. constraint —— 客观约束。身体、环境、兼容性。
+   key 用「域:具体」，如 `身体:耳道`、`环境:桌面`、`兼容:手机`
+2. reject —— 硬性排斥。品牌、形态、被否决的型号 + 原因。
+   key 用 `brand:XX` / `form:XX` / `model:XX`
+3. scene —— 稳定使用场景（长期用途，不是这次的需求）。key 直接写品类，如 `笔记本`、`耳机`
+4. weight —— 品类内的取舍优先级。key 写品类，value 用数组按优先级排列
 
-请输出 JSON 格式，包含两个字段：
-1. "facts": 值得长期记忆的用户信息数组，每条包含：
-   - "content": 信息内容（简洁中文）
-   - "category": 分类（identity/preference/behavior/issue/other）
-2. "interaction_summary": 本次交互的一句话摘要
+**绝对不能抽**（这些是本次窗口的参数，写进去就会污染画像）：
+- 预算数字（「1 万以内」「2000 左右」）
+- 候选清单、对比维度、「还没决定」「再想想」这类过程状态
+- 客服做了什么（推荐了哪款、报了什么价、给了哪些备选）
+- 一次性的、下个月不再成立的信息
 
-示例输出：
+字段要求：
+- "key"：上面的规范，简洁
+- "value"：字符串；scene / weight 可以为数组
+- "quote"：用户原话片段（不超过 20 字），必须来自对话原文
+
+输出 JSON：
 {{
-  "facts": [
-    {{"content": "用户是钻石会员", "category": "identity"}},
-    {{"content": "用户偏好红色系的运动鞋", "category": "preference"}}
+  "profile": [
+    {{"slot": "constraint", "key": "身体:耳道", "value": "小，戴不住入耳式", "quote": "入耳式戴半小时就疼"}},
+    {{"slot": "reject", "key": "brand:星海", "value": "售后慢，不考虑", "quote": "上次星海售后拖了半个月"}},
+    {{"slot": "scene", "key": "笔记本", "value": ["打游戏"], "quote": "主要打 CS"}}
   ],
-  "interaction_summary": "用户咨询了Nike运动鞋的退换货，最终申请了退款"
+  "interaction_summary": "一句话说明本次聊了什么"
 }}
 
-如果对话中没有值得长期记忆的新信息，facts 返回空数组。
-interaction_summary 必须填写。
+规则：
+- 最多 3 条，按重要性排序；不确定就少写
+- 没有值得记录的就返回空的 profile 数组
+- 已有画像（避免重复，若本次给出了新值则照常输出，系统会按 key 覆盖）：
+{existing_ltm}
 
 只输出 JSON，不要加其他内容。"""

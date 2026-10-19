@@ -209,6 +209,10 @@ export function ChatPage() {
           {state.loading && <div className="loading-state" role="status" aria-label="正在加载会话"><span className="skeleton-line skeleton-line-short" /><span className="skeleton-line" /><span className="skeleton-line skeleton-line-medium" /></div>}
           {!state.loading && state.messages.length === 0 && <div className="empty-chat"><span className="empty-mark" aria-hidden="true">PW</span><h2>这次，想选什么？</h2><p>预算、用途，以及你最在意的那一点。</p><div className="quick-questions">{['6000 元以内的轻薄本', '通勤降噪耳机', '适合打游戏的电脑'].map((text) => <button type="button" key={text} className="query-chip" disabled={!state.currentSessionId} onClick={() => { setComposerValue(text); document.getElementById('message-input')?.focus() }}>{text}</button>)}</div></div>}
           {state.messages.map((message, index) => <ChatMessage key={`${message.message_id || 'local'}-${index}`} message={message}
+            products={state.recommendations}
+            selectedRefs={state.selectedRefs}
+            onDetail={(product) => void openDetails(product)}
+            onToggle={toggleCompare}
             execution={index === lastMessageIndex && message.role === 'assistant' ? state.execution : []} streaming={state.streaming && index === lastMessageIndex} />)}
         </div>
         {state.error && <div className="inline-error" role="alert"><span>{state.error}</span><button className="icon-button" type="button" title="关闭提示" aria-label="关闭提示" onClick={() => dispatch({ type: 'CLEAR_ERROR' })}><X size={17} /></button></div>}

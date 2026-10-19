@@ -17,6 +17,7 @@ export function ProductDetailDrawer({ product, detail, loading, onClose, onCompa
     <div className="drawer-backdrop" onClick={onClose} />
     <section className="drawer-content">
       <header><div><span>商品详情</span><h2>{current.name || product.name}</h2></div><button className="icon-button" type="button" onClick={onClose} title="关闭详情" aria-label="关闭详情"><X size={20} /></button></header>
+      {(current.image || product.image) && <img className="drawer-image" src={current.image || product.image || ''} alt="" />}
       {loading ? <div className="drawer-loading">正在读取当前商品信息…</div> : <>
         <div className="drawer-price">¥{Number(current.price || product.price || 0).toLocaleString('zh-CN')}<span>{current.brand || product.brand} · {current.category || product.category}</span></div>
         <p className="drawer-summary">{detail?.introduction?.[0] || product.summary || product.reason}</p>

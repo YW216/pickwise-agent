@@ -229,6 +229,10 @@ def _build_app(*, secret: str, session_dir: str | Path,
     app.include_router(routes.favorites_router)
     app.include_router(routes.health_router)
     frontend_dir = Path(__file__).resolve().parents[2] / "frontend-react" / "dist"
+    media_dir = Path(__file__).resolve().parents[2] / "assets" / "products"
+    if media_dir.is_dir():
+        # 商品图先于根挂载注册，避免被前端 dist 吞掉。
+        app.mount("/media", StaticFiles(directory=media_dir), name="media")
     if frontend_dir.is_dir():
         # API 路由已先注册，根挂载负责 React 构建产物和静态资源。
         app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")

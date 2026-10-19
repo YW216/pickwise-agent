@@ -180,6 +180,15 @@ class MultiAgentOrchestrator:
     def history_size(self) -> int:
         return len(self.raw_messages)
 
+    def _has_history(self) -> bool:
+        """本会话是否已有过往轮次（决定是否注入跨会话长期记忆）。
+
+        判据只看工作历史里有没有 assistant 回复：首轮只有刚追加的一条 user。
+        """
+        return bool(self.summary) or any(
+            message.get("role") == "assistant" for message in self.raw_messages
+        )
+
     async def chat(
         self, user_input: str, events: asyncio.Queue | None = None,
         product_context: list[dict] | None = None,
@@ -354,11 +363,12 @@ class MultiAgentOrchestrator:
                 for message in entry.new_messages
                 if message.get("role") == "tool"
             ]
-            cards = build_recommendations(
+            cards = await build_recommendations(
                 reply,
                 tool_messages,
                 user_id=self.identity.user_id,
                 session_id=self.identity.session_id,
+                database_url=self.database_url,
             )
             if cards:
                 await self._fill_missing_prices(cards)
@@ -462,7 +472,11 @@ class MultiAgentOrchestrator:
         return ContextPack(
             history=self.raw_messages,
             summary=self.summary,
-            memory_sections=self.memory_manager.build_memory_prompt_sections(),
+            # 首轮（还没有 assistant 回复、也没压缩摘要）不注入跨会话长期记忆：
+            # 否则新会话第一句就"记得"上个会话的预算，模型会当成用户刚说过。
+            memory_sections=self.memory_manager.build_memory_prompt_sections(
+                include_long_term=self._has_history(),
+            ),
             skill_catalog="",
             product_block=format_products_block(self.products),
         )

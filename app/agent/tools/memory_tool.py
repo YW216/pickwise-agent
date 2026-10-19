@@ -19,8 +19,16 @@ def recall_user_memory(query: str = "", *, manager: MemoryManager | None = None)
     manager.ltm.load()
     payload: dict = {
         "short_term_facts": list(manager.stm.facts),
-        "long_term_facts": [
-            {"content": f.content, "category": f.category}
+        # 用户画像：四类固定槽位（constraint/reject/scene/weight），按 key 唯一
+        "profile": [
+            {
+                "slot": f.slot,
+                "key": f.key,
+                "value": f.value,
+                "quote": f.quote,
+                "evidence": f.evidence,
+                "updated_at": f.updated_at,
+            }
             for f in manager.ltm.facts
         ],
     }

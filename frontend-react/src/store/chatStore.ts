@@ -73,6 +73,8 @@ function normalizeProducts(items: unknown[]): RecommendedProduct[] {
     price: Number(item.price || 0),
     summary: String(item.summary || ''),
     reason: String(item.reason || '本轮回答中提到'),
+    image: typeof item.image === 'string' ? item.image : undefined,
+    best: item.best === true,
   }))
 }
 
@@ -182,11 +184,15 @@ export function chatReducer(state: ChatState, action: Action): ChatState {
       const { event, data } = action.event
       if (event === 'recommendations') {
         const incoming = recommendations(data)
-        const incomingRefs = new Set(incoming.map((item) => item.ref))
-        return {
-          ...state,
-          recommendations: [...incoming, ...state.recommendations.filter((item) => !incomingRefs.has(item.ref))],
-        }
+        // 同一商品可能在不同轮次以不同 ref 出现；名称是用户看到的唯一身份。
+        const seenNames = new Set<string>()
+        const merged = [...incoming, ...state.recommendations].filter((item) => {
+          const key = item.name.replace(/\s+/g, '').toLowerCase()
+          if (seenNames.has(key)) return false
+          seenNames.add(key)
+          return true
+        })
+        return { ...state, recommendations: merged }
       }
       if (event === 'answer.delta') {
         return {
@@ -212,7 +218,7 @@ export function chatReducer(state: ChatState, action: Action): ChatState {
     case 'TOGGLE_COMPARE': {
       const selected = state.selectedRefs.includes(action.ref)
         ? state.selectedRefs.filter((ref) => ref !== action.ref)
-        : state.selectedRefs.length < 4 ? [...state.selectedRefs, action.ref] : state.selectedRefs
+        : state.selectedRefs.length < 3 ? [...state.selectedRefs, action.ref] : state.selectedRefs
       return { ...state, selectedRefs: selected }
     }
     case 'STREAM_STOPPED':
