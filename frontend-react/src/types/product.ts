@@ -7,14 +7,6 @@ export interface PublicProduct {
   summary: string
 }
 
-export interface ProductSearchResult {
-  results?: PublicProduct[]
-  candidates?: PublicProduct[]
-  nearest?: PublicProduct[]
-  total?: number
-  query?: string
-}
-
 export interface RecommendedProduct extends PublicProduct {
   ref: string
   display_no: number

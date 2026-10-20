@@ -18,6 +18,7 @@ def init_user_schema(database_url: str, *, legacy_user_id: str = "default") -> i
                     added_at TIMESTAMP NOT NULL DEFAULT now(),
                     PRIMARY KEY (user_id, product_id)
                 );
+                ALTER TABLE user_favorites DROP COLUMN IF EXISTS favorite_ref;
                 CREATE TABLE IF NOT EXISTS user_state_migrations (
                     name VARCHAR PRIMARY KEY,
                     applied_at TIMESTAMP NOT NULL DEFAULT now()
@@ -54,12 +55,12 @@ async def get_favorites(database_url: str, user_id: str, *,
         FROM user_favorites f JOIN products p ON p.product_id = f.product_id
         WHERE f.user_id = %(uid)s
           AND (%(cat)s::text IS NULL OR p.category = %(cat)s::text)
-        ORDER BY f.added_at, f.product_id
+        ORDER BY f.added_at DESC, f.product_id
         LIMIT %(lim)s
     """
     async with (await _pool_for(database_url)).connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(sql, {"uid": user_id, "cat": category, "lim": max(1, min(limit, 20))})
+            await cur.execute(sql, {"uid": user_id, "cat": category, "lim": max(1, min(limit, 50))})
             rows = await cur.fetchall()
     return [
         {"product_id": pid, "name": name, "brand": brand, "category": cat,
@@ -95,3 +96,20 @@ async def remove_favorite(database_url: str, user_id: str, product_id: str) -> b
             changed = cur.rowcount > 0
         await conn.commit()
     return changed
+
+
+async def get_favorite_product_id(
+    database_url: str, user_id: str, product_id: str,
+) -> str | None:
+    """确认商品属于当前用户的收藏，并返回商品 ID。"""
+    validate_user_id(user_id)
+    sql = """
+        SELECT product_id
+        FROM user_favorites
+        WHERE user_id = %s AND product_id = %s
+    """
+    async with (await _pool_for(database_url)).connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql, (user_id, product_id))
+            row = await cur.fetchone()
+    return str(row[0]) if row else None

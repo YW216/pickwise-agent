@@ -6,7 +6,7 @@ interface ProductDetailDrawerProps {
   detail: ProductDetail | null
   loading: boolean
   onClose: () => void
-  onCompare: () => void
+  onCompare?: () => void
 }
 
 export function ProductDetailDrawer({ product, detail, loading, onClose, onCompare }: ProductDetailDrawerProps) {
@@ -22,7 +22,7 @@ export function ProductDetailDrawer({ product, detail, loading, onClose, onCompa
         <div className="drawer-price">¥{Number(current.price || product.price || 0).toLocaleString('zh-CN')}<span>{current.brand || product.brand} · {current.category || product.category}</span></div>
         <p className="drawer-summary">{detail?.introduction?.[0] || product.summary || product.reason}</p>
         {specs.length > 0 && <dl className="drawer-specs">{specs.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl>}
-        <button className="drawer-compare" type="button" onClick={onCompare}>加入对比</button>
+        {onCompare && <button className="drawer-compare" type="button" onClick={onCompare}>加入对比</button>}
       </>}
     </section>
   </div>

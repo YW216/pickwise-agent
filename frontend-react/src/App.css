@@ -68,6 +68,8 @@ body { background: var(--bg); color: var(--ink); font: 15px/1.7 var(--sans); }
 .app { display: grid; grid-template-columns: 264px minmax(0, 1fr) 332px; height: 100dvh; overflow: hidden; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; color: var(--mu); background: transparent; }
 .icon-button:hover { color: var(--jade); background: var(--soft); }
+.favorite-toggle { position: relative; width: 36px; height: 36px; border: 1px solid var(--ln); border-radius: 10px; }
+.favorite-toggle span { position: absolute; top: -5px; right: -6px; display: grid; min-width: 17px; height: 17px; padding: 0 4px; place-items: center; border: 2px solid var(--sf); border-radius: 99px; color: #162019; background: var(--gold); font: 700 10px/1 var(--num); }
 .mobile-menu-button, .catalog-toggle, .catalog-close, .panel-close, .panel-backdrop { display: none; }
 
 /* The sidebar, message feed and catalog scroll independently. */
@@ -280,6 +282,9 @@ body { background: var(--bg); color: var(--ink); font: 15px/1.7 var(--sans); }
 .recommendation-actions { display: flex; gap: 6px; }
 .recommendation-detail { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--ln); border-radius: 99px; color: var(--mu); background: var(--sf); }
 .recommendation-detail:hover { border-color: var(--jade); color: var(--jade); }
+.recommendation-favorite { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--ln); border-radius: 99px; color: var(--mu); background: var(--sf); }
+.recommendation-favorite:hover { border-color: var(--error); color: var(--error); }
+.recommendation-favorite[aria-pressed='true'] { border-color: var(--error); color: var(--error); background: var(--error-bg); }
 .recommendation-compare { height: 30px; padding: 0 14px; border: 1px solid var(--ln); border-radius: 99px; color: var(--ink); background: var(--sf); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .recommendation-compare:hover { border-color: var(--jade); color: var(--jade); }
 .recommendation-compare[aria-pressed='true'] { border-color: var(--jade); color: var(--onj); background: var(--jade); }
@@ -308,8 +313,22 @@ body { background: var(--bg); color: var(--ink); font: 15px/1.7 var(--sans); }
 .drawer-specs div { display: flex; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--ln); font-size: 13px; }
 .drawer-specs dt { color: var(--mu); }
 .drawer-specs dd { max-width: 65%; color: var(--ink); text-align: right; }
-.drawer-compare { width: 100%; min-height: 44px; border: 0; border-radius: 9px; color: var(--onj); background: var(--jade); font-weight: 700; }
+.drawer-actions { display: grid; grid-template-columns: auto 1fr; gap: 10px; }
+.drawer-favorite { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 16px; border: 1px solid var(--ln); border-radius: 9px; color: var(--ink); background: var(--sf); font-size: 13px; font-weight: 700; }
+.drawer-favorite:hover { border-color: var(--error); color: var(--error); }
+.drawer-favorite[aria-pressed='true'] { border-color: var(--error); color: var(--error); background: var(--error-bg); }
+.drawer-compare { min-height: 44px; border: 0; border-radius: 9px; color: var(--onj); background: var(--jade); font-weight: 700; }
+.favorites-list { display: flex; flex-direction: column; gap: 12px; }
+.favorite-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px; border: 1px solid var(--ln); border-radius: 12px; background: var(--sf); }
+.favorite-body { display: grid; gap: 5px; min-width: 0; }
+.favorite-body b { font-size: 14px; }
+.favorite-body small { color: var(--mu); font-size: 12px; }
+.favorite-body p { margin: 0; color: var(--mu); font-size: 12px; line-height: 1.55; }
 .drawer-loading { padding: 40px 0; color: var(--mu); }
+.favorites-empty { display: grid; justify-items: center; gap: 8px; padding: 64px 16px; color: var(--mu); text-align: center; }
+.favorites-empty svg { margin-bottom: 4px; color: var(--gold); }
+.favorites-empty b { color: var(--ink); font-size: 15px; font-weight: 600; }
+.favorites-empty span { max-width: 28ch; font-size: 12px; line-height: 1.6; }
 
 @media (max-width: 1180px) {
   .catalog-toggle { display: inline-flex; }

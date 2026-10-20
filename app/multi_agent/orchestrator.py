@@ -286,12 +286,6 @@ class MultiAgentOrchestrator:
         # build_working_messages + 工具 schema），供后面的专家执行准备。
         if await self._try_compact(pack):
             pack = self._build_pack()
-        if product_context:
-            pack = replace(pack, selected_products="\n".join(
-                f"- #{item.get('display_no') or 0:02d} {item.get('name') or '商品'}"
-                f"（内部 ID: {item.get('product_id', '')}）"
-                for item in product_context
-            ))
         # 路由不再做"强制压缩重试"（2026-10-08 移除，理由见下）。
         #
         # 为什么不重试：Router 根本不读完整历史——它只收「最近 4 条

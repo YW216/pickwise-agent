@@ -1,405 +1,663 @@
 <div align="center">
   <img src="assets/pickwise-banner.jpg" alt="PickWise 智能 3C 选购助手" width="100%" />
 
-  <h1>PickWise · 智能 3C 选购决策助手</h1>
-  <p><strong>纯 Python 编排 · 手写 ReAct · 不依赖 LangChain / LangGraph · 7 个直接依赖</strong></p>
-  <p>让每一次 3C 选购，都更明智。</p>
+  <h1>🛒 PickWise · 智能 3C 选购决策助手</h1>
+  <p><strong>多 Agent 编排 · 手写 ReAct · 混合检索 · 上下文工程 · 多租户隔离</strong></p>
+  <p>不依赖 LangChain / LangGraph —— 从会话管理到工具调用，每一层都自己实现</p>
 
   <p>
-    <img src="https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white" alt="Python" />
-    <img src="https://img.shields.io/badge/Agent-Multi--Agent-6C63FF" alt="Multi-Agent" />
-    <img src="https://img.shields.io/badge/Reasoning-ReAct-0EA5E9" alt="ReAct" />
-    <img src="https://img.shields.io/badge/Retrieval-Dense%20%2B%20BM25-14B8A6" alt="Dense and BM25" />
-    <img src="https://img.shields.io/badge/Vector%20DB-Milvus-3B82F6" alt="Milvus" />
-    <img src="https://img.shields.io/badge/Tests-pytest-0F766E" alt="pytest" />
+    <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
+    <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+    <img src="https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" />
+    <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+    <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
+    <img src="https://img.shields.io/badge/Milvus-00A1EA?style=for-the-badge&logo=milvus&logoColor=white" alt="Milvus" />
+  </p>
+
+  <p>
+    <a href="#-核心亮点">核心亮点</a> ·
+    <a href="#-系统架构">系统架构</a> ·
+    <a href="#-多-agent-编排">多 Agent 编排</a> ·
+    <a href="#-上下文工程">上下文工程</a> ·
+    <a href="#-工具系统">工具系统</a> ·
+    <a href="#-检索与知识">检索与知识</a> ·
+    <a href="#-快速开始">快速开始</a>
   </p>
 </div>
+
+<!--
+  TODO：建议在此放 1~2 张截图（聊天界面 + 执行时间线 + 推荐面板），例如：
+  <p align="center"><img src="docs/images/demo.png" width="88%" alt="PickWise Demo" /></p>
+-->
 
 ---
 
 ## 🎯 项目简介
 
-PickWise 是一个面向 3C 消费场景的选购决策助手。它通过 **手写 ReAct 循环与多 Agent 编排**，把需求理解、工具调用、知识检索、上下文记忆和结果整合组织成一条可控制、可评测的执行路径。
+**PickWise** 是一个面向 3C 商品（笔记本 / 手机 / 耳机）选购的智能决策助手。用户用自然语言描述预算、用途和偏好，系统会理解需求、筛选商品、查询选购知识、对比候选款，并给出有依据的推荐。
 
-它不依赖 LangChain / LangGraph 等 Agent 编排框架。编排逻辑由项目自身实现，并尽量让关键行为具备明确的边界、失败路径和可验证的规则。
+它的重点不是「调用一次大模型」，而是把下面这些东西组织成一个**完整、可运行、可评测的 Agent 应用**：
 
-> **核心设计：单 Agent 与多 Agent 不是两套模式，而是同一条执行路径的两个特例。** 当任务只需要一个 Agent（N = 1）时直接返回；需要多个 Agent 时，再由 Result Agent 汇总各自回执。
+> 用户会话 · 多 Agent 协作 · 工具调用 · 商品检索 · 知识库检索 · 用户记忆 · 上下文压缩 · SSE 过程展示 · 幂等与用户隔离
 
-## 🧭 目录导航
+## ✨ 核心亮点
 
-- [项目亮点](#-项目亮点) · [系统架构](#-系统架构) · [工程设计](#-三个不那么显然的工程设计)
-- [工具调用安全](#-工具体系与调用安全) · [混合检索](#-检索dense--bm25-混合检索) · [评估体系](#-评估体系)
-- [韧性设计](#-韧性设计明确每一层的责任边界) · [记忆机制](#-记忆机制) · [快速开始](#-快速开始)
-- [项目结构](#-项目结构) · [测试](#-测试) · [技术栈](#-技术栈) · [已知事项](#-已知事项与限制)
-
-## ✨ 项目亮点
-
-| 亮点 | 设计价值 |
-|---|---|
-| 🧭 **统一编排路径** | Router 负责场景判定，Orchestrator 统一调度；N = 1 直返，N > 1 汇总。 |
-| 🛠️ **原生工具调用** | 使用 OpenAI 兼容协议的 function calling；工具 schema 同时服务模型提示与执行前校验。 |
-| 🔎 **混合检索** | Dense 向量检索与 BM25 稀疏检索并行执行，再通过 RRF 融合排名。 |
-| 🧠 **分层记忆** | STM 维护近期交互上下文，LTM 持久化长期事实，并在会话关闭时进行巩固。 |
-| 🛡️ **韧性设计** | 区分瞬时故障与上下文溢出，限制重复工具调用，避免把不完整输出当成最终答案。 |
-| 🧪 **可重复评测** | 规则断言决定用例是否通过；LLM-as-judge 只作参考，测试使用隔离 session 与本地 mock。 |
+| | 亮点 | 一句话说明 |
+|:--:|---|---|
+| 🧩 | **历史工具调用投影** | 多 Agent 共享历史时，把「别人的工具调用」折叠成语义中性的描述——Agent 读得懂上下文，却不会照抄去调自己没有的工具 |
+| 🗜️ | **事务式上下文压缩** | 先生成摘要、确认上下文真的变小，才删除旧消息；任一步失败都零副作用 |
+| 🛡️ | **工具三道闸门** | 协议解析 → schema 校验（归一化 / 夹紧 / 拒绝）→ 重复调用熔断；失败以统一信封回喂模型，而不是抛异常 |
+| 🔎 | **混合检索** | Dense 向量 + BM25 关键词 + RRF 融合，商品库与知识库分库；硬条件以 PostgreSQL 真值下推，不信索引里的旧数据 |
+| 🔄 | **商品索引增量同步** | 卡片文本 hash 判断变化，只有文本变了才重算向量；乐观锁 + 状态最后提交，天然幂等 |
+| 🔐 | **多租户隔离 + 幂等** | 签名 Cookie + CSRF、`(user_id, session_id)` 会话键、商品 `ref` 作用域绑定、`Idempotency-Key` 防重复执行 |
+| 📡 | **SSE 过程可视化** | 需求理解 → 商品筛选 → 知识查询 → 生成建议，每一步实时可见；浏览器断连不会丢失已生成的结果 |
+| 🧪 | **可复现评测** | 231 条用例，规则断言决定通过与否，LLM-as-judge 只做参考；沙箱隔离、判分器自检 |
 
 ## 🏗️ 系统架构
 
 ```mermaid
-flowchart TD
-    A[用户输入] --> B["ContextPack<br/>历史 · 摘要 · 记忆 · 技能"]
-    B --> C{"Router<br/>LLM 判定场景"}
-    C -->|presale| D["售前 Agent<br/>8 个工具"]
-    C -->|consult| E["咨询 Agent<br/>3 个工具"]
-    C -->|两者| D
-    C -->|两者| E
-    D --> F["Blackboard<br/>单轮回执"]
-    E --> F
-    F --> G{需要汇总吗？}
-    G -->|N = 1| H[直接回复]
-    G -->|N > 1| I[Result Agent 汇总]
-    I --> H
+flowchart TB
+    subgraph FE["🖥️ 前端 · React 19 + TypeScript + Vite"]
+        UI["ChatPage<br/>消息流 · 执行时间线 · 推荐面板 · 商品对比"]
+    end
+
+    subgraph API["⚡ FastAPI · 全异步"]
+        direction LR
+        AUTH["匿名身份<br/>签名 Cookie + CSRF"]
+        IDEM["幂等保护<br/>Idempotency-Key"]
+        SSE["SSE 事件流"]
+    end
+
+    SM["🗂️ SessionManager<br/>(user_id, session_id) → Orchestrator<br/>会话锁 · TTL 回收"]
+
+    subgraph MA["🧠 MultiAgentOrchestrator"]
+        direction LR
+        RT["Router<br/>场景分流"]
+        P["presale Agent<br/>售前选购 · 8 工具"]
+        C["consult Agent<br/>咨询问答 · 3 工具"]
+        BB["Blackboard<br/>单轮回执"]
+        RS["Result Agent<br/>汇总"]
+        RT --> P & C
+        P & C --> BB --> RS
+    end
+
+    TM["🔧 ToolManager<br/>白名单 · 校验 · 熔断 · 统一信封"]
+
+    subgraph DATA["💾 数据与知识"]
+        PG[("PostgreSQL<br/>业务真值")]
+        MV[("Milvus<br/>检索索引")]
+        MEM["记忆 STM / LTM"]
+        SK["Skills"]
+    end
+
+    W["⚙️ Worker<br/>增量同步进程"]
+
+    UI -->|"HTTP / SSE"| API --> SM --> MA
+    P & C --> TM
+    TM --> PG & MV & MEM & SK
+    PG -.->|"定时扫描"| W -.->|"upsert / delete"| MV
 ```
 
-### 一轮请求如何执行
+**核心原则：PostgreSQL 是业务真值，Milvus 只是检索索引；会话是并发与隔离的边界；Agent 的能力由工具白名单硬隔离。**
 
-1. **ContextPack**：组合近期历史、摘要、长期记忆与可用技能，为本轮执行准备上下文。
-2. **Router**：根据用户意图判断场景，选择售前 Agent、咨询 Agent，或同时选择两者。
-3. **SubAgent**：沿着手写 ReAct 循环执行推理与工具调用；每个 Agent 只能看到自己的工具白名单。
-4. **Blackboard**：收集各 Agent 的单轮执行回执，包括成功结果或失败信息。
-5. **结果交付**：只运行一个 Agent 时直接返回；多个 Agent 参与时由 Result Agent 汇总已有结果，并如实说明未完成的部分。
-
-## 💡 三个不那么显然的工程设计
-
-### 1. 历史视图投影：不让 Agent 模仿邻居的工具调用
-
-共享历史可能包含其他 Agent 的 `tool_calls`。如果模型看到邻居调用过某工具，可能会模仿调用；但执行层的工具白名单必然拒收，白白消耗额外的 LLM 轮次。
-
-PickWise 会按**完整消息块**处理历史：将一条 `assistant(tool_calls)` 及其后连续的 tool 消息作为整体判定。当块内工具全部越权时，将整块折叠为中性文本，而不是只删除某一条消息。
-
-- 折叠后的文本不暴露具体工具名。
-- 文案按语义类别生成，例如检索、对比或用户偏好。
-- 不把“读取用户收藏夹”模糊描述成“完成信息检索”，避免后续 Agent 误以为必要检索已经完成。
-
-> **工程取舍：文案失真导致的错误认知，可能比工具名泄漏更昂贵。** 因此，历史投影既要隔离工具权限，也要尽可能保留真实语义。
-
-### 2. 上下文压缩是事务，而不是原地删消息
-
-压缩流程遵循“先计算、后提交”的原则：
-
-1. 生成候选摘要，不立即修改原始状态。
-2. 确认压缩结果确实比原上下文更小。
-3. 只有在前两步成功后，才删除被覆盖的历史前缀并替换 summary。
-4. 任一步失败，都保留原状态，避免上下文被破坏。
-
-切点从最新消息向前累积 token，并且只在 user turn 起点切分，避免拆开 `user → assistant(tool_calls) → tool → assistant` 这样的完整调用链。若摘要本身过长，则再次压缩摘要；宁可舍弃部分叙述性细节，也不让压缩失败拖垮整次请求。
-
-### 3. HTTP 200 不代表模型完成了任务
-
-即使 API 返回 HTTP 200，以下情况仍不能视为有效的最终答复：
-
-- 回复内容为空；
-- `finish_reason = length`，表示输出被截断；
-- 响应仍携带 `tool_calls`，表示模型仍希望继续调用工具。
-
-任一条件成立，都视为“模型未返回完整有效的最终答复”，进入对应的降级路径。这样可以避免将空白、不完整或尚未执行完工具调用的内容直接交付给用户。
-
-## 🧰 工具体系与调用安全
-
-PickWise 使用 OpenAI 原生 function calling，并以 `TOOL_DEFINITIONS` 作为 schema 单一事实来源：
-
-```text
-TOOL_DEFINITIONS
-      │
-      └── 派生 → _SCHEMA_MAP → 执行前参数校验
-      │                            │
-      └── 提供给模型的工具说明 ────┘
-```
-
-模型看到的工具定义和执行层的参数约束来自同一份 schema，减少“模型以为可以调用、执行层却按另一套规则校验”的契约漂移。参数不符合契约时，错误会回馈给模型，让它尝试修正，而不是直接结束任务。
-
-### 三道闸门
-
-| 顺序 | 闸门 | 作用 |
-|---|---|---|
-| ① | **协议层** | 解析 JSON，检查工具参数能否被正确读取。 |
-| ② | **契约层** | 依据 schema 校验参数与字段约束。 |
-| ③ | **重复调用熔断** | 同一参数签名第 3 次调用时拦截，并提示模型更换查询条件或基于现有信息作答。 |
-
-重复调用签名使用参数归一化后的稳定 JSON 计算，因此仅把参数从 `"10"` 改写成 `10`，不能绕过熔断。参数归一化与签名的实际实现以代码为准。
-
-### Agent 工具白名单
-
-| Agent | 场景 | 可用工具数 |
-|---|---|---:|
-| `presale` | 售前选购 | 8 |
-| `consult` | 售前咨询 | 3 |
-
-工具权限通过**按 Agent 裁剪 function schema** 实现硬隔离，而不是依靠 prompt 请求模型自觉遵守。上表表示各 Agent 的可用工具规模，不代表两组工具一定完全不重叠。
-
-## 🔍 检索：Dense + BM25 混合检索
-
-知识库与商品库均使用 Milvus 混合检索，并在服务端通过 Reciprocal Rank Fusion（RRF）融合稀疏与稠密检索的排名。
+### 一次请求的生命周期
 
 ```mermaid
 flowchart LR
-    Q[原始查询] --> S["BM25 稀疏检索<br/>服务端 jieba 分词"]
-    Q --> E[Embedding]
-    E --> D["Dense 向量检索<br/>COSINE"]
-    S --> R[RRF 排名融合]
-    D --> R
-    R --> O[候选结果]
+    Q(["💬 用户消息"]) --> PRE["上下文预检<br/>估算 token"]
+    PRE -->|"超过 窗口 − 预留"| CMP["🗜️ 事务式压缩"]
+    PRE -->|"未超过"| RT
+    CMP --> RT["🔀 Router 分流"]
+    RT --> EX["⚡ 并行执行<br/>asyncio.gather"]
+    EX --> N{"几个 Agent？"}
+    N -->|"1 个"| OUT(["✅ 直接返回"])
+    N -->|"多个"| RES["Result Agent 汇总"]
+    RES --> OUT
+    OUT --> POST["推荐卡片 · 记忆更新 · 会话落库"]
 ```
 
-**为什么 BM25 使用原始查询？** 只有 retriever 层同时持有查询原文和 embedder，因此原文透传放在 retriever 层处理，而不额外耦合到更上层的编排代码。
+## 🧠 多 Agent 编排
 
-**为什么生产检索与评测共用实现？** 让真实请求和检索评测经过同一条检索路径，减少“离线测的是一套逻辑、生产跑的是另一套逻辑”的偏差。
+> 📍 `app/multi_agent/` — `orchestrator.py` · `router.py` · `agents.py` · `blackboard.py` · `context_pack.py`
 
-默认使用 **Milvus Lite**，数据存储在本地 `.db` 文件中，无需单独部署服务；需要切换到 Milvus Standalone 时，可通过配置 URI 切换。具体配置项以 `.env.example` 和 `app/config/settings.py` 为准。
+### Router：把问题分给合适的 Agent
 
-## 🧪 评估体系
+| 用户问题 | 路由结果 |
+|---|---|
+| 「6000 元买轻薄本」 | `[presale]` |
+| 「OLED 和 LCD 有什么区别」 | `[consult]` |
+| 「推荐一台适合办公的电脑，并解释屏幕怎么选」 | `[presale, consult]` → 并行执行后汇总 |
+
+- **输出契约**：小写化 → 去重 → 合法性过滤 → 固定顺序 → 空结果兜底为 `consult`，保证下游拿到的永远是有序、合法、非空的场景列表
+- **轻量分类调用**：`temperature=0`、固定低思考强度（`reasoning_effort=low`），只读「最近 4 条消息（每条 ≤ 300 字）+ 历史摘要 + 当前输入」
+- **前缀缓存友好**：固定不变的 `ROUTER_PROMPT` 放在最前，动态内容全部排在后面，让服务端 KV Cache 能命中
+- **瞬时故障降级**：模型限流 / 超时等瞬时错误时回退默认场景，并明确记录为「降级」，而不是当成无损成功
+
+### SubAgent：手写 ReAct 循环
+
+```mermaid
+flowchart LR
+    M["调用模型"] --> D{"返回 tool_calls？"}
+    D -->|"是"| T["ToolManager 执行工具"]
+    T --> O["结果写回上下文"] --> M
+    D -->|"否"| F{"有效终答？<br/>非空 · 未截断"}
+    F -->|"是"| A(["✅ 最终答复"])
+    F -->|"否"| E(["❌ 视为失败"])
+    M -.->|"超过最大步数"| X["去掉工具<br/>基于已有观察收尾"] -.-> A
+```
+
+- **每个 Agent 独立配置**：system prompt、工具白名单、最大步数（默认 10）、上下文预算、工具结果截断策略
+- **HTTP 200 ≠ 任务完成**：回复为空、`finish_reason=length`、或仍携带 `tool_calls`，一律视为「未返回有效终答」，不会把半截内容交给用户
+- **并行安全（Copy-on-Write）**：每个 Agent 只操作自己的 working 副本，执行期间 `raw_messages` 一个字不变；合并由主线程按固定顺序单点完成
+
+| Agent | 职责 | 工具白名单 |
+|---|---|---|
+| 🛍️ `presale` | 售前选购：理解预算 / 用途，筛选、对比、推荐 | `search_catalog` `search_products` `get_detail` `compare_products` `get_user_favorites` `retrieve_knowledge` `load_skill` `recall_user_memory` |
+| 💬 `consult` | 咨询问答：参数科普、售后政策、FAQ | `retrieve_knowledge` `get_detail` `load_skill` |
+
+### Blackboard：只写不互读
+
+- Agent 之间**不互相读取**，互不等待，可以真正并行
+- 只有 Result Agent 读取全部回执；黑板只服务当前一轮，**不跨轮持久化**
+- 只有 1 个 Agent 时直接返回；多个 Agent 才汇总——单 / 多 Agent 是同一条执行路径的两种特例
+- **部分失败 ≠ 整体失败**：失败记录写入黑板，Result Agent 如实说明哪部分没完成；Result Agent 自己不调工具，避免编造
+
+## 🧩 上下文工程
+
+> 📍 `app/agent/context_budget.py` · `compaction.py` · `product_tracker.py` · `app/multi_agent/context_pack.py`
+
+这是项目里最值得细看的部分。核心思路：**存档轨道**（`raw_messages`，完整可恢复）与**工作轨道**（按 Agent 权限和预算生成的 working messages）分离。
+
+```mermaid
+flowchart LR
+    RAW["📦 raw_messages<br/>完整轨迹 · 持久化 · 可恢复"] --> PROJ["按 Agent 投影<br/>工具权限 + 预算"]
+    PROJ --> WORK["📝 working messages<br/>实际送入模型"]
+    SUM["摘要 / 记忆 / 商品记忆 / 技能目录"] --> WORK
+```
+
+### 1️⃣ 历史工具调用投影
+
+**问题**：两个 Agent 共享同一份会话历史，里面包含对方的 `tool_calls`。模型看到「邻居调过某个工具」，会模仿去调；但执行层的白名单必然拒收，白白浪费一轮 LLM 调用。
+
+**做法**：构建每个 Agent 的 working messages 时，按**完整调用块**（一条 `assistant(tool_calls)` + 其后连续的 `tool` 消息）判定——块内工具**全部越权**，就整块折叠成一句中性描述；只要含有共享工具，整块原样保留。
+
+```text
+折叠前（consult 视角）                          折叠后
+assistant: tool_calls = [search_products(…)]   assistant: （上一轮完成了商品与知识检索，
+tool:      {"results": [ …长长的商品 JSON… ]}              具体工具与结果已略。）
+```
+
+- **保留语义，不留符号**：Agent 仍能读懂「上一轮发生过什么」，但看不到工具名和参数，没有可模仿的对象
+- **文案按语义类别生成**（检索 / 查询 / 对比 / 用户偏好 / 流程加载），而不是一句笼统的「已检索」。文案失真比泄漏工具名代价更大：把「读取用户收藏」说成「做过检索」，下一轮可能跳过 `recall_user_memory` 直接编造偏好
+- **必须整块折叠**：OpenAI 协议要求 `tool_calls` 与 `tool` 消息成对出现，拆开会让 API 直接报错
+- 投影只作用于入站视图，**不改动 `raw_messages` 这份事实**
+- 已知取舍：同一次响应里混调越权工具与共享工具时整块保留。该组合在当前白名单结构下结构性罕见，按调用粒度拆分反而会让轨迹失真
+
+### 2️⃣ 事务式上下文压缩
+
+压缩被设计成一个**事务**：先计算、后提交。
+
+```mermaid
+flowchart TD
+    A["估算 token<br/>消息 + 工具 schema"] --> B{"超过 窗口 − 预留？"}
+    B -->|"否"| Z(["原样使用"])
+    B -->|"是"| C["从最新消息向前累积 token<br/>在 user 轮次起点处切分"]
+    C --> D["调用模型生成六段式摘要<br/>旧摘要 + 增量 delta"]
+    D --> E{"摘要格式合法？"}
+    E -->|"否"| D2["重试一次"] --> E2{"仍不合法？"}
+    E2 -->|"是"| K
+    E -->|"是"| F{"新上下文确实更小？"}
+    E2 -->|"否"| F
+    F -->|"否"| K(["保留原状态，放弃压缩"])
+    F -->|"是"| G["✅ 提交：并入商品记忆<br/>删除旧前缀 · 替换摘要"]
+```
+
+| 设计点 | 说明 |
+|---|---|
+| **切点只落在 user 消息** | 天然不会拆开 `user → assistant(tool_calls) → tool → assistant` 调用链；按 token 从后往前累积（保护「最近」而不是「找得到哪能切」），当前尚未完成的 turn 永远不进摘要。切点思路参考 pi agent，并做了简化 |
+| **保守的 token 估算** | 中文约 1.5 token、ASCII 约 3 字符 / token，宁多不少；同时估算 tool schema，并取「所有 Agent × 单 / 多模式」中最大的一个作基准；真实 `prompt_tokens` 另行记录用于校准 |
+| **六段式结构化摘要** | 用户目标 / 约束与偏好 / 进展 / 关键决策 / 下一步 / 关键上下文；固定标题校验，缺段、乱序、空段都判失败 |
+| **增量摘要** | 只基于「旧摘要 + 本段 delta」生成，不全量重述 |
+| **摘要撞墙补救** | 增量摘要只增不减，越限就再也压不动——所以越限时让模型把摘要自己再压缩到上限的 2/3，宁可丢叙述细节，也不让压缩整体失效 |
+| **先摘要后删除** | 摘要失败、格式不对、没有缩小上下文，原始历史都不会被破坏 |
+
+**参数**（`.env`）：
+
+| 变量 | 默认值 | 含义 |
+|---|---|---|
+| `CONTEXT_WINDOW` | 200000 | 策略阈值（不是模型真实窗口），提前压缩以控制成本与延迟 |
+| `RESERVE_TOKENS` | 32768 | 为回复预留的空间，同时是生成调用的 `max_tokens`；触发线 = `CONTEXT_WINDOW − RESERVE_TOKENS` |
+| `KEEP_RECENT_TOKENS` | 8000 | 压缩后保留的最近上下文 |
+
+> 💡 导购对话通常远小于 30K token，默认值下几乎不会触发压缩。想观察压缩行为时，可以调小为 `CONTEXT_WINDOW=40000`、`RESERVE_TOKENS=16384`、`KEEP_RECENT_TOKENS=8000`。
+
+### 3️⃣ 工具结果截断
+
+工具结果超长时，给模型看的是**带头尾的 JSON 预览**，并明确标注 `original_chars / shown_chars / omitted_chars`，要求「不可推断省略部分」。预算分配头尾各 7/16、余下 1/8 留给 JSON 骨架与转义膨胀，硬约束 `len(view) <= max_chars`。
+
+> 入库即截断：存下来的就是模型看到的，不再「全量入账 + 发送前另做一份视图」，两者也就不会漂移。
+
+### 4️⃣ 商品记忆：不依赖文本摘要
+
+`product_tracker.py` 独立保存对话中出现过的商品（`product_id` / `name` / `price_at_mention`）：
+
+- **事实源唯一**：名称和价格只从**工具返回的 JSON** 提取，不让 LLM 参与，不会被模型「顺手改写」
+- 压缩时在同一事务内先并入商品记忆、再删除原文，所以压缩之后依然能回答「上次推荐的那款」
+- 字段名显式叫 `price_at_mention`，并在 prompt 中声明是历史价，防止下一轮把旧价当现价报给用户
+
+## 🔧 工具系统
+
+> 📍 `app/agent/tools/` — `registry.py` · `manager.py` · `validation.py` · `result.py`
+
+| 工具 | 作用 | presale | consult |
+|---|---|:--:|:--:|
+| `search_catalog` | PostgreSQL 结构化筛选（预算 / 品类 / 品牌 / 参数） | ✅ | |
+| `search_products` | 商品语义检索（Milvus 混合检索 + PG 回查真值） | ✅ | |
+| `get_detail` | 商品详情 | ✅ | ✅ |
+| `compare_products` | 多款商品对比 | ✅ | |
+| `retrieve_knowledge` | 选购指南 / FAQ / 配送 / 售后知识 | ✅ | ✅ |
+| `get_user_favorites` | 当前用户的收藏 | ✅ | |
+| `recall_user_memory` | 主动读取用户画像 | ✅ | |
+| `load_skill` | 按需加载技能流程 | ✅ | ✅ |
+
+### schema 是契约的单一事实来源
+
+同一份 `TOOL_DEFINITIONS` 既作为 Function Calling 的说明书发给模型，又被**反向读取**来做执行前的参数校验——不存在「说明书改了、校验忘改」。
+
+### 三道闸门
+
+```mermaid
+flowchart LR
+    A["模型发起 tool_call"] --> G1["① 协议层<br/>JSON 解析"]
+    G1 --> G2["② 契约层<br/>schema 校验"]
+    G2 --> G3["③ 熔断<br/>同签名调用上限"]
+    G3 --> EX["执行工具"]
+    EX --> ENV["统一信封<br/>→ tool 消息"]
+    G1 -.->|"失败：回喂让模型重发"| A
+    G2 -.->|"失败：回喂让模型改参"| A
+    G3 -.->|"拦截：回喂让模型换路子"| A
+```
+
+- **① 协议层**：刻意**不修补**坏 JSON——截断若发生在值的中间，补出来的是错参数且完全静默
+- **② 契约层**：按「错误有没有消解歧义」分三类处置
+
+  | 处置 | 例子 |
+  |---|---|
+  | 无损归一化（静默） | `"10"` → `10`；可选参数传 `null` 视为未提供 |
+  | 边界夹紧（并告知） | `limit` 超上限取上限；数组超长取前 N 项，信息记入 `notice` |
+  | 语义拒绝 | 枚举越界、必填缺失、数组不足下限 |
+
+- **③ 熔断**：同一签名（工具名 + **归一化后**的参数）在一轮内第 3 次调用会被拦下；签名建立在归一化之后，所以把 `"10"` 改写成 `10` 绕不过去。计数生命周期 = 一次 ReAct 循环，不会误伤用户下一轮的重复提问
+
+### 统一信封：失败是输入，不是异常
+
+```json
+{ "success": false, "error": "没有符合条件的商品，请调整预算或条件", "data": {} }
+```
+
+所有工具返回同一结构。对模型来说失败是「可以据此继续决策的业务输入」（换条件 / 如实告知用户），`error` 只放人话、不拼异常细节。
+
+## 🔍 检索与知识
+
+> 📍 `app/agent/rag/` · `app/agent/tools/search_products.py` · `app/services/product_sync.py` · `app/worker.py`
+
+### 混合检索：Dense + BM25 + RRF
+
+```mermaid
+flowchart LR
+    Q["原始查询"] --> E["Embedding<br/>bge-m3"] --> D["Dense 向量检索<br/>COSINE"]
+    Q --> B["BM25 稀疏检索<br/>服务端 jieba 分词"]
+    D --> R["RRF 排名融合<br/>服务端完成"]
+    B --> R
+    R --> K["Top-K"]
+    K -.->|"可选"| RR["Reranker 精排<br/>bge-reranker-v2-m3"]
+```
+
+- **Dense** 负责语义相近的问法；**BM25** 负责型号、品牌、专有名词的词面精确匹配；**RRF** 按排名融合，不受两路分数量纲不同的影响
+- **索引模型校验**：Embedding 模型名随 collection 持久化，加载时与当前 Embedder 比对，不一致直接报错，避免「换了模型却还在用旧索引」
+- **Reranker 为可选的二阶段精排**，默认关闭
+- **两个 collection**：`ecom_kb`（知识库，按二级标题切块，更新频率低）与 `product_kb`（商品语义库，一商品一条，随目录变化），语义域和更新节奏都不同
+
+### 商品检索：Milvus 只管召回，真值回查 PostgreSQL
+
+`search_products` 的两个关键设计：
+
+1. **硬条件用 PG 真值下推**：品类 / 价格不再用 Milvus 标量过滤（索引里的旧价会漏召回或误杀），而是先按 PG 当前数据算出符合条件的 ID 集合，再下推 `product_id in [...]`。表达式只用仓储返回的 ID 构造，不拼接任何用户原文
+2. **命中后批量回查 PG**：价格永远是最新的，不依赖进程内快照
+
+### 商品索引增量同步
+
+```mermaid
+flowchart LR
+    PG[("PostgreSQL<br/>商品真值")] --> W["Worker 定时扫描<br/>默认 300 秒"]
+    W --> H["计算卡片文本 hash"]
+    H --> D{"变化类型"}
+    D -->|"新增 / 文本变化"| E1["重算 embedding 写入"]
+    D -->|"仅价格等行变化"| E2["复用旧向量<br/>整行 upsert"]
+    D -->|"已删除"| E3["从 Milvus 删除"]
+    E1 --> V["写入 + 抽查验证"]
+    E2 --> V
+    E3 --> V
+    V --> U["乐观锁回写<br/>indexed_at / card_hash"]
+```
+
+- **单 hash 设计**：`card_hash` 只回答「向量要不要重算」；价格、品类等行数据永远取 PG 整行 upsert，没有「哪个字段变了」的分支。卡片文本**不含价格**，改价不会触发重算 embedding
+- **幂等三支柱**：① `product_id` 即 Milvus 主键，upsert / delete 天然幂等；② **状态最后提交**——Milvus 写完并抽查通过，才回写 PG 的索引状态，中途失败下一轮自然重做；③ **乐观锁**——标记带 `WHERE updated_at = 快照值`，同步期间又被改过的行不会被标成「已索引」
+- **契约指纹**：Embedding 模型 + 卡片模板版本参与校验，不一致拒绝增量同步，提示全量重建
+- **Worker 是独立进程**：「跑完再计时」避免慢轮次堆积重入；单轮失败退避重试而不退出；SIGTERM 优雅退出
+
+```bash
+python -m app.worker                                            # 常驻增量同步
+python app/scripts/build_product_kb.py --mode incremental --dry-run   # 只看差异计划
+python app/scripts/build_product_kb.py --mode rebuild                 # 全量重建
+```
+
+## 🔐 多租户与会话隔离
+
+> 📍 `app/api/auth.py` · `app/services/session_manager.py` · `app/services/idempotency.py` · `app/services/product_refs.py`
+
+| 层面 | 实现 |
+|---|---|
+| 🪪 **匿名身份** | 服务端用 `itsdangerous` 签名的 Cookie（用户 UUID + CSRF 随机值），不手写加解密；Cookie 被篡改或过期返回 401，**不会静默签发新身份** |
+| 🛑 **CSRF** | 写请求必须携带与凭证内一致的 `X-Pickwise-CSRF`（`compare_digest` 安全比对），并校验 `Origin` 白名单 |
+| 🗂️ **会话键** | `(user_id, session_id)` 是会话的唯一键；落库表主键同为该组合，跨用户无法读取 |
+| 🏷️ **商品 `ref`** | 前端只拿到随机 `ref` 和展示编号（#01 / #02），**看不到内部 `product_id`**；ref 绑定 `user_id + session_id`，别的用户 / 会话拿到也无法使用，1 小时 TTL |
+| 🔁 **请求幂等** | `Idempotency-Key` + 请求 hash，判定为 `execute / replay / in_progress / conflict` 四种结果之一，客户端重试不会让 Agent 重复执行；账本写失败也不会重跑已完成的 Agent，而是标注 `X-Idempotency-Persisted: false` |
+| 🔒 **会话并发** | 同一会话同时只允许一个请求在跑，后到的直接返回 `SESSION_BUSY`；不同会话完全并行 |
+| ♻️ **资源回收** | 空闲 Agent 按 TTL（默认 30 分钟）回收，上限 100 个活跃会话；持久化失败的会话暂不回收，避免丢内存里的最新数据；服务退出时排空并逐会话保存 |
+
+## 📡 流式体验与前端
+
+> 📍 `frontend-react/src/` · `app/api/routes.py` · `app/services/chat_events.py`
+
+**SSE 事件**（`POST /api/chat/stream`）：
+
+```text
+event: status          {"stage":"routing","state":"running","title":"理解需求", ...}
+event: status          {"stage":"routing","state":"done"}
+event: tool.started    {"agent":"presale","tool":"search_catalog","tool_title":"按预算和条件筛选商品", ...}
+event: tool.finished   {"agent":"presale","summary":"找到 8 款商品","count":8, ...}
+event: recommendations {"products":[ …卡片（无内部 product_id）… ]}
+event: answer.delta    {"text":"根据你的预算……","seq":0}
+event: done            {"reply":"…","failed":false,"replayed":false}
+```
+
+- **过程事件是实时的**：路由、每次工具调用的开始 / 结束都在执行过程中推出，前端据此渲染「理解需求 → 筛选商品 → 查询资料 → 生成建议 → 保存会话」时间线
+- **断连不丢结果**：执行放在独立任务里，浏览器断开只停止传输，生成、保存、幂等记账照常完成；用相同 `Idempotency-Key` 重试会直接回放结果
+- **不拖慢 Agent**：事件队列有界，队列满时丢弃最旧的展示事件；15 秒心跳保活
+- **推荐面板与正文严格一致**：只展示回答里「真正陈列」的商品（表格行 / 标题 / 列表项算陈列，顺口罗列不算），卡片价格以正文所写为准，没写才回退目录价
+
+> ⚠️ 诚实说明：`answer.delta` 是 Agent **生成完整答案之后**按句切分回放，不是模型的 token 级流式。当前解决的是「过程展示」，不是首字延迟。
+
+**前端**：React 19 + TypeScript + Vite，`useReducer` 管理页面状态（当前规模无需 Redux）；手写 SSE 解析（支持心跳注释、断流检测）；商品详情抽屉、最多 3 款商品对比、会话列表与中断请求。
+
+## 💭 记忆与技能
+
+> 📍 `app/agent/memory/` · `app/agent/skills/`
+
+**记忆系统**
+
+| | 短期记忆 STM | 长期记忆 LTM |
+|---|---|---|
+| 范围 | 当前会话 | 跨会话，按用户 |
+| 内容 | 预算、用途、偏好、排斥条件、近期事实 | 用户画像槽位：`constraint` 约束 / `reject` 排斥 / `scene` 场景 / `weight` 权重 |
+| 更新 | 每轮成功后由模型从最近消息提取 | 会话结束时巩固，原子写入 |
+| 使用 | 注入 system prompt | Agent 通过 `recall_user_memory` **按需读取** |
+
+> 会话**首轮不注入**长期记忆：新会话一上来就带着上个会话的预算和场景，模型会误以为「你已经说过」而跳过澄清（实测问题）。需要历史偏好时由 Agent 自己调用 `recall_user_memory`。记忆提取失败不会覆盖已经生成的答案。
+
+**Skills 技能系统**
+
+技能是 `SKILL.md`（YAML frontmatter + Markdown 指令），遵循 Agent Skills 的渐进式披露：启动时只把每个技能的 `name + description`（约 100 token）放进 prompt，Agent 判断需要时再调用 `load_skill` 加载完整流程；frontmatter 中的 `agents` 字段控制技能对哪个 Agent 可见。内置 `product-recommend` · `process-return` · `policy-check` · `track-order` 四个技能。
+
+## 🗄️ 数据层
+
+> 📍 `app/db/`
+
+```text
+PostgreSQL  =  业务真值   商品 · 规格 · 价格 · 收藏 · 会话快照 · 幂等记录
+Milvus      =  检索索引   只负责召回，价格 / 详情一律回查 PG
+```
+
+| 表 | 内容 |
+|---|---|
+| `products` | 商品目录、规格、介绍、价格，附带 `card_hash` / `indexed_at` 索引状态 |
+| `favorites` · `user_favorites` | 用户收藏 |
+| `sessions` | 会话快照（`messages` / `summary` / `short_term_memory` / `products` / `recommendations` 为 JSONB），带 `version` 与 `status` |
+| `chat_idempotency_records` | 幂等账本（主键 `user_id + session_id + idempotency_key`，带过期时间） |
+
+- 内置 100 款种子商品（笔记本 34 / 手机 33 / 耳机 33），仅用于冷启动与灾备，运行时一律以 PG 为准
+- 使用 `psycopg` 异步连接池；Web 模式走 PostgreSQL，CLI 模式走本地 JSON 会话文件
+
+## 🧪 评测与测试
+
+> 📍 `app/evaluation/` · `app/scripts/run_*_eval.py` · `tests/`
 
 > **规则断言决定通过与否，LLM-as-judge 只提供参考。**
 
-`CaseResult.passed` 只由确定性规则决定。评审模型输出可能存在波动，不应成为自动化评测的最终开关。
-
-### 评测数据集：共 231 条用例
-
-| 数据集 | 数量 | 覆盖内容 |
+| 数据集 | 数量 | 覆盖 |
 |---|---:|---|
 | `cases.json` | 20 | 端到端流程，含多轮指代消解 |
-| `router_cases.json` | 55 | 场景路由，包含 group / difficulty 维度 |
-| `rag_cases.json` | 152 | 检索质量，仅使用人工审核的标注 |
-| `cases_isolation.json` | 4 | 工具白名单泄漏探针 |
-| **合计** | **231** | — |
-
-### 运行评测
+| `router_cases.json` | 55 | 场景路由 |
+| `rag_cases.json` | 152 | 检索质量（Hit@K / MRR / Recall@K） |
+| `cases_isolation.json` | 4 | 跨 Agent 工具名泄漏探针（验证历史投影是否生效） |
+| **合计** | **231** | |
 
 ```bash
-# 端到端评测（20 条）
-python app/scripts/run_eval.py
-
-# Router 专项评测（55 条）
-python app/scripts/run_router_eval.py
-
-# RAG 检索评测：Hit@K / MRR / Recall@K
-python app/scripts/run_rag_eval.py --top-k 5
-
-# 判分器自检
-python app/scripts/run_eval.py --self-test
+python app/scripts/run_eval.py                 # 端到端评测
+python app/scripts/run_eval.py --self-test     # 判分器自检
+python app/scripts/run_router_eval.py          # Router 专项
+python app/scripts/run_rag_eval.py --top-k 5   # RAG 检索评测
 ```
 
-### 评测设计中的关键约束
+- **沙箱隔离**：每条用例独立临时会话，关闭记忆读写，避免历史长期记忆污染评分
+- **判分器自己也要被测**：自检用例构造含伪造 ID / 伪造价格的回复轨迹，验证判分器能否拒绝
+- **量化幻觉防御**：检查回复里的商品 ID 是否来自真实目录、价格是否存在于目录
+- **LLM judge 防抖**：`temperature=0` + 带版本号的 rubric + 强制 JSON 输出，解析失败重试一次，再失败标「未判」，宁可不判也不打假分
+- **自动化测试**（`pytest tests/ -v`）覆盖 API 与认证、CSRF 与用户隔离、SSE、会话管理、幂等、工具校验与熔断、上下文预算 / 投影 / 压缩、多 Agent、商品同步、异常恢复等；核心用例注入假 client / `httpx.MockTransport` 离线运行，`verify_*.py` 是需要真实服务的手动端到端验证脚本
 
-- **Sandbox 隔离**：每条用例使用独立临时 session，关闭记忆读写，防止历史长期记忆注入 prompt 干扰评分；关闭 MCP，仅使用本地 mock，保证 ground truth 可控。
-- **不修改生产代码**：通过对共享的 `chat.completions.create` 打 monkey-patch 实现插桩，而不是为了评测改写生产路径。
-- **判分器自身也要被测**：`--self-test` 构造含伪造 ID 或伪造价格的回复轨迹，检查判分器能否正确拒绝。
-- **量化幻觉防御**：`valid_ids_only` 检查 ID 是否来自真实目录；`reply_prices_in_catalog` 检查回复价格是否存在于商品目录。
-- **评测运行韧性**：`runtime` 断言避免把服务故障时的兜底文本算成成功的推荐答案。
+## ⚖️ 设计取舍
 
-## 🛡️ 韧性设计：明确每一层的责任边界
+**为什么这么做 · 没做什么 · 为什么不做**
 
-| 层级 | 负责 | 不负责 |
-|---|---|---|
-| SDK / HTTP | 超时、重试、退避 | 执行本地写操作 |
-| Router | 瞬时故障时回退默认场景 | 保证降级后仍完整完成推荐 |
-| SubAgent | 只接受非空且未截断的答复 | 把代码异常伪装成正常答案 |
-| Result Agent | 整合已有成果 | 编造失败 Agent 未成功取得的结果 |
-| 入口层 | 接纳结果、对失败轮次补答 | 因记忆或保存失败覆盖已经生成的答案 |
-
-### 部分失败，不等于整体失败
-
-- 单 Agent 任务失败时，直接将失败向上抛出。
-- 多 Agent 任务中，失败记录写入 Blackboard，由 Result Agent 根据已有成果如实说明未完成部分。
-- 故障 Agent 不做无意义的重复调用。
-- 只有 `overflow` 子集会在上下文压缩成功后重试一次；如果压缩未能缩小上下文，则不重复执行同样大小的请求。
-
-### 两类异常，分别处理
-
-异常识别采用两个相互独立的维度：
-
-- `is_transient`：连接错误、超时、限流和 5xx 等瞬时故障。
-- `is_context_overflow`：`context_length_exceeded` 等上下文长度问题。
-
-两类异常都收窄识别范围，遵循“宁可漏判，也不误判”的原则。参数错误不是上下文溢出，压缩无法修复参数错误；连接中断也不应默认触发上下文压缩。
-
-## 🧠 记忆机制
-
-PickWise 将短期上下文与长期记忆分开管理：
-
-| 维度 | STM（短期记忆） | LTM（长期记忆） |
-|---|---|---|
-| 存储 | 进程内存 | 本地 JSON 文件 |
-| 主要用途 | 保留近期对话上下文 | 巩固用户事实与长期偏好 |
-| 更新时机 | 每轮成功后更新 | 会话关闭时巩固 |
-| 边界 | 只保留最近 6 条消息 | 原子写入；提取失败不影响已生成的回答 |
-
-记忆用于辅助后续交互，不应成为覆盖本轮有效答案的故障源。具体保留窗口与巩固时机如有调整，以实际配置和实现为准。
+| 模块 | 当前做法 | 为什么 | 没做 / 代价 |
+|---|---|---|---|
+| 会话并发 | 同一会话忙时直接拒绝（`SESSION_BUSY`） | 实现简单，天然避免并发修改同一份历史 | 没做排队。要支持可用「队列 + 锁」的生产者—消费者模型 |
+| SessionManager | 进程内存缓存活跃 Agent | 复用 Agent，低延迟 | 多进程部署需要分布式锁（如 Redis）或会话路由 |
+| 会话持久化 | PostgreSQL JSONB 整行快照 | 实现简单、恢复方便 | 会话很长时整行读写会变重，后续可拆消息表 / 增量存储 |
+| SSE | 完整答案切分后回放 | 目标是过程展示 | 不是 token 流式；降低首字延迟需要改造 LLM 调用层 |
+| Router | 只看最近 4 条 + 摘要 | 只做分流、只有两个 Agent，信息足够 | 没把商品记忆喂给 Router 做指代消解——它交给下游 Agent 使用 |
+| Agent 数量 | 两个（售前 / 咨询） | 业务天然分成这两类，且确有「同时需要」的场景 | 业务扩展后再增加 Agent，让协作更充分 |
+| Result Agent | 不调用工具 | 角色单一、上下文可控、避免循环 | 汇总时信息不足只能如实说明 |
+| 黑板 | 只写不互读 | 并行简单、无死锁、延迟低 | 跨 Agent 的冲突只能靠 Result Agent 调解 |
+| 工具结果截断 | 超限保留头尾预览 | 防御性设计：防模型传参异常导致结果过大 | 检索工具本身已限制返回数，实际很少触发；也可再加固定的 max count |
+| 身份认证 | 匿名签名 Cookie | 目的是跑通并验证多租户隔离 | 生产环境可换成账号体系（如 JWT） |
+| MCP | 仅保留客户端与转换器，未接入 | 当前工具均为本地实现 | `ToolManager` 启用 MCP 时降级为本地工具；不要把 MCP 当作已完成能力 |
 
 ## 🚀 快速开始
 
 ### 环境要求
 
-- Python 环境（请按项目实际依赖选择兼容版本）
-- 一个支持 OpenAI 兼容协议的 LLM API Key
-- 可用的 Embedding 服务：当主模型服务不提供 embedding 接口时，需要单独配置
+- Python 3.x、Node.js（建议最新 LTS）
+- 一个 OpenAI 兼容协议的 LLM API Key（默认配置为 DeepSeek）
+- 一个 Embedding 服务（默认 `BAAI/bge-m3`；DeepSeek 官方不提供 Embedding 接口，示例使用 SiliconFlow）
+- PostgreSQL 与 Milvus Standalone
 
-除 LLM API 外，其他基础设施尽可能提供降级路径。Milvus 默认可使用本地 Milvus Lite；PostgreSQL 和 Langfuse 为可选服务，但当前版本的 Python 依赖有额外注意事项，详见下文。
+### 1. 启动基础设施
 
-### 1. 克隆仓库并安装依赖
+仓库不附带 compose 文件，请自行启动 PostgreSQL（默认连接 `localhost:15432`）和 Milvus Standalone（默认 `http://localhost:19530`，部署方式见 [Milvus 官方文档](https://milvus.io/docs)）：
 
 ```bash
-git clone https://github.com/YW216/pickwise.git
-cd pickwise
-
-python -m venv .venv
-
-# macOS / Linux
-source .venv/bin/activate
-
-# Windows PowerShell 可使用：
-# .venv\Scripts\Activate.ps1
-
-pip install -r requirements.txt
-
-# 当前 requirements.txt 未声明，但启动 / 测试需要单独安装
-pip install langfuse pytest
+docker run -d --name pickwise-pg \
+  -e POSTGRES_USER=pickwise -e POSTGRES_PASSWORD=pickwise -e POSTGRES_DB=pickwise \
+  -p 15432:5432 postgres:16
 ```
 
-### 2. 配置环境变量
-
-复制配置模板后，请先检查并移除 `Settings` 未声明的键，再填入自己的凭据：
+### 2. 安装依赖并配置
 
 ```bash
+git clone https://github.com/YW216/pickwise-agent.git
+cd pickwise-agent
+
+python -m venv .venv
+source .venv/bin/activate        # Windows PowerShell: .venv\Scripts\Activate.ps1
+
+pip install -r requirements.txt
+pip install langfuse             # 编排器会 import，当前 requirements.txt 未声明（追踪功能本身可不配置）
+
 cp .env.example .env
 ```
 
-示例配置如下（请按实际模型服务修改）：
+编辑 `.env`，至少填写：
 
 ```ini
 OPENAI_API_KEY=sk-你的模型服务密钥
-OPENAI_BASE_URL=https://api.deepseek.com
-MODEL_NAME=deepseek-v4-flash
 
-# 检索所需的 Embedding 服务
-# DeepSeek 官方不提供 embedding 接口；此处示例使用 SiliconFlow
+# Embedding（DeepSeek 不提供，需单独配置）
 EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
 EMBEDDING_API_KEY=sk-你的Embedding服务密钥
-EMBEDDING_MODEL=BAAI/bge-m3
+
+# Web 服务必填：匿名 Cookie 签名密钥，至少 32 字节
+# 生成：python -c "import secrets; print(secrets.token_urlsafe(48))"
+AUTH_SECRET_KEY=替换为随机字符串
 ```
 
-> ⚠️ **配置注意**：`Settings` 使用 `pydantic-settings` 的 `extra_forbidden`。如果 `.env` 包含未声明的键，配置加载可能整体失败。不要未经检查就照抄模板中的所有变量。
+> `DATABASE_URL`、`MILVUS_URI` 等其余配置均有默认值，完整列表见 `.env.example` 与 `app/config/settings.py`。
 
-### 3. 启动交互式会话
+### 3. 初始化数据
 
 ```bash
-python main.py
+python app/scripts/init_pg.py                           # 建表 + 播种 100 款商品
+python app/scripts/build_kb_index.py                    # 构建知识库索引（ecom_kb）
+python app/scripts/build_product_kb.py --mode rebuild   # 构建商品语义索引（product_kb）
 ```
 
-交互式命令：
+### 4. 启动
 
-| 命令 | 功能 |
-|---|---|
-| `skills` | 列出可用技能 |
-| `memory` | 查看记忆原文 |
-| `reset` | 重置当前会话 |
-| `quit` | 退出程序 |
+```bash
+# 后端（http://127.0.0.1:8000）
+python run.py
 
-### 外部服务：哪些是必需的？
+# 另开终端：商品索引增量同步 worker
+python -m app.worker
 
-| 服务 | 是否必需 | 未配置时的行为 |
-|---|---|---|
-| **LLM API** | ✅ 必需 | 无法完成推理与生成；入口会显式报告缺失配置。 |
-| **Embedding API** | ⚠️ 检索必需 | 无法执行需要向量嵌入的检索。若主模型服务不支持 Embedding，必须单独配置。 |
-| **Milvus** | 检索功能必需 | 默认使用 Milvus Lite 本地文件模式，无须单独部署 Milvus 服务。 |
-| **PostgreSQL** | 可选 | 回退到本地 JSON 数据文件。 |
-| **Langfuse** | 可选功能 | 追踪功能退化为 no-op；但目前 `orchestrator.py` 存在强 import，因此运行环境仍需安装 `langfuse`。 |
-| **MCP 服务端** | 当前不启用 | 服务端已暂停，当前走本地工具路径。 |
+# 前端
+cd frontend-react
+npm install
+npm run build     # 构建后由 FastAPI 在 / 托管，直接访问 http://127.0.0.1:8000
+# 或开发模式：npm run dev   → http://localhost:5173（/api 自动代理到 8000）
+```
+
+只想体验 Agent 本身？也可以用命令行模式：
+
+```bash
+python main.py    # 支持 skills / memory / reset / quit
+```
 
 ## 📁 项目结构
 
+<details>
+<summary>点击展开目录树</summary>
+
 ```text
-pickwise/
-├── main.py
+pickwise-agent/
+├── main.py                          # CLI 入口（本地 JSON 会话）
+├── run.py                           # Web 入口（Uvicorn）
 ├── app/
-│   ├── multi_agent/             # 编排层
-│   │   ├── orchestrator.py      # 统一编排入口
-│   │   ├── router.py            # LLM 场景判定与执行顺序整理
-│   │   ├── agents.py            # 轻量 ReAct SubAgent
-│   │   ├── context_pack.py      # 共享上下文与历史视图投影
-│   │   └── blackboard.py        # 收集单轮 Agent 回执
-│   ├── agent/                   # 能力层，不负责多 Agent 编排
-│   │   ├── compaction.py        # 上下文压缩
-│   │   ├── context_budget.py    # token 预算与异常分类
-│   │   ├── tools/               # 工具定义、schema 与校验闸门
-│   │   ├── memory/              # STM / LTM 与事实提取
-│   │   ├── rag/                 # Milvus 混合检索
-│   │   └── skills/              # SKILL.md 流程加载
-│   ├── evaluation/              # sandbox、指标、判分与报告
-│   ├── config/settings.py       # pydantic-settings 配置
-│   └── scripts/                 # 评测入口
-├── tests/                       # 自动化测试
-├── requirements.txt
-└── README.md
+│   ├── api/                         # FastAPI：app / routes / auth / deps / schemas / envelope
+│   ├── services/                    # 会话与业务服务
+│   │   ├── session_manager.py       #   (user_id, session_id) → Orchestrator，会话锁与 TTL
+│   │   ├── session_service.py       #   应用服务层，屏蔽具体存储
+│   │   ├── idempotency.py           #   聊天幂等
+│   │   ├── product_refs.py          #   商品 ref 作用域绑定
+│   │   ├── recommendations.py       #   推荐卡片构建
+│   │   └── product_sync.py          #   PG → Milvus 增量同步核心
+│   ├── multi_agent/                 # 编排层
+│   │   ├── orchestrator.py          #   统一编排入口
+│   │   ├── router.py                #   场景分流
+│   │   ├── agents.py                #   SubAgent（手写 ReAct）
+│   │   ├── blackboard.py            #   单轮回执
+│   │   └── context_pack.py          #   上下文打包与历史工具调用投影
+│   ├── agent/                       # 能力层
+│   │   ├── compaction.py            #   事务式压缩
+│   │   ├── context_budget.py        #   token 估算 / 异常分类 / 工具结果预览
+│   │   ├── product_tracker.py       #   商品记忆
+│   │   ├── tools/                   #   registry · manager · validation · 业务工具
+│   │   ├── rag/                     #   chunker · embedder · Milvus 后端 · retriever · reranker
+│   │   ├── memory/                  #   短期 / 长期记忆
+│   │   └── skills/                  #   SKILL.md 技能
+│   ├── db/                          # PostgreSQL：商品 / 会话 / 用户状态 / 种子数据
+│   ├── evaluation/                  # 沙箱 · 指标 · 判分 · 报告 · 评测数据集
+│   ├── prompts/                     # Router / 子 Agent / Result / 记忆 / 摘要 prompt
+│   ├── scripts/                     # 初始化、建索引、评测入口
+│   ├── mcp_client/                  # MCP 客户端（预留）
+│   ├── config/settings.py           # pydantic-settings 配置
+│   └── worker.py                    # 增量同步 worker
+├── frontend-react/src/              # api · components · pages · store · types
+├── mcp_server/                      # MCP 服务端（暂停使用）
+├── assets/                          # 横幅与商品图片
+└── tests/                           # 自动化测试与验证脚本
 ```
 
-> 上述目录树是按项目职责整理的阅读导航。实际文件名或目录若与当前分支不一致，请以仓库内容为准。
+</details>
 
-**架构分层原则：编排层决定“谁来做、按什么顺序做”；能力层提供“具体怎么做”的工具、记忆与检索能力。** 两者职责分离，减少模块间的职责重叠。
+## 🔌 API 一览
 
-## ✅ 测试
+<details>
+<summary>点击展开接口列表</summary>
 
-```bash
-pytest tests/ -v
-```
+所有接口使用统一响应信封（`success` / `data` / `error` / `request_id`）。
 
-自动化测试刻意保持离线：不消耗真实模型 token，也不依赖外部网络。
+| 分类 | 接口 |
+|---|---|
+| 身份 | `POST /api/auth/anonymous` |
+| 会话 | `POST /api/sessions` · `GET /api/sessions` · `GET /api/sessions/{id}` · `GET /api/sessions/{id}/messages` · `DELETE /api/sessions/{id}` |
+| 聊天 | `POST /api/chat` · `POST /api/chat/stream`（SSE，前端主要使用） |
+| 商品 | `GET /api/products/search` · `GET /api/products/{product_id}` · `GET /api/products/ref/{product_ref}` · `POST /api/products/compare` |
+| 收藏 | `GET /api/favorites` |
+| 健康 | `GET /api/health`（进程存活）· `GET /api/ready`（检查 PostgreSQL / Milvus） |
 
-- `test_resilience.py` 使用假 client 注入故障，验证降级路径。
-- `test_llm_transport.py` 使用 `httpx.MockTransport` 模拟 HTTP 交互。
-- 另有若干 `verify_*.py` 脚本会真实调用 LLM / Milvus，属于手动端到端验证，执行前请确认服务和凭据已配置。
-- `tests/test_multi_agent.py` 是脚本式断言，不属于标准 pytest 收集的测试用例。
+</details>
 
-可离线验证的故障路径，才适合纳入可重复测试；生产依赖不可用时，不应该成为单元测试无法运行的理由。
+## 🚧 已知边界与规划
 
-## 🧱 技术栈
+- **SessionManager 是单进程内存结构**：多进程部署需要 Redis 分布式锁或会话路由，否则同一会话可能被多个进程同时处理
+- **会话是 JSONB 快照**：简单可靠，但长会话整行读写会变重，后续可考虑消息表 / 增量存储
+- **SSE 不是 token 级流式**：若要降低首字延迟，需要改造 LLM 调用层
+- **长期记忆目前落在本地 JSON 文件**，多实例部署时无法共享
+- **MCP 尚未真正接入**：运行路径是 `Agent → 本地 ToolManager → 本地工具`
+- **商品图目前以品类图为主**：`product_images.py` 已支持按商品 ID 匹配专属图
+- **身份认证只是匿名模式**，用于验证多租户隔离
 
-| 层级 | 组件 / 方案 | 用途 |
-|---|---|---|
-| Agent 编排 | 自研 Python 编排、手写 ReAct、`ThreadPoolExecutor` | 任务路由与协作；不依赖 LangChain / LangGraph |
-| 模型接口 | `openai` SDK（OpenAI 兼容协议） | LLM 推理、生成与 function calling |
-| Embedding | `BAAI/bge-m3`（可配置兼容服务） | 检索向量生成 |
-| 检索 | Milvus + BM25 + Dense + RRF | 混合检索与排名融合 |
-| 配置与校验 | Pydantic v2、`pydantic-settings` | 类型校验与配置管理 |
-| 追踪 | Langfuse（可选） | 链路与调用观察 |
-| 数据 | PostgreSQL（可选）与本地 JSON | 持久化与降级存储 |
-| 测试 | pytest、`unittest.mock`、`httpx.MockTransport` | 离线验证与故障注入 |
+**Roadmap**
 
-## ⚠️ 已知事项与限制
+- [ ] 多进程会话路由 / Redis 分布式锁
+- [ ] 同会话请求排队（队列 + 锁）
+- [ ] LLM 调用层改造，支持真正的 token 级流式
+- [ ] 账号体系（JWT）替换匿名身份
+- [ ] 长期记忆持久化到数据库
+- [ ] 补齐 `requirements.txt`（`langfuse`、`pytest`）
+- [ ] MCP 服务端的重新接入
 
-- **凭据不硬编码**：密钥配置不设默认值，由 `.env` 或环境变量注入。缺少凭据时，在调用入口通过 `assert_openai_configured()` / `assert_embedding_configured()` 显式报错，而不是在 import 阶段崩溃。
-- **Embedding 凭据回退有条件**：`EMBEDDING_*` 留空时可回退到主模型配置，但仅当主服务实际提供兼容的 Embedding 接口时成立。若使用不提供 Embedding 的模型服务，需要配置独立的 Embedding API。
-- **依赖声明尚需补齐**：当前 `requirements.txt` 未声明 `langfuse` 和 `pytest`；启动应用与执行测试前需单独安装。
-- **`.env.example` 需要核对**：配置使用 `extra_forbidden`，未声明变量可能导致整个配置加载失败。
-- **MCP 服务端已暂停**：`mcp_server/server.py` 当前仅保留注释，客户端代码就绪，但现阶段执行路径降级为本地工具。
-- **非 pytest 风格测试**：`tests/test_multi_agent.py` 使用脚本式断言，不会被 pytest 自动收集。
-- **学习期草稿不属于应用入口**：根目录 `agentdemo.py`、`test.py`、`wtest.py` 是 function calling / 装饰器实验草稿；其中 `agentdemo.py` 当前不可运行。
+## 📚 源码阅读路线
 
-## 🗺️ 规划方向
+<details>
+<summary>想真正读懂这个项目，建议按这个顺序</summary>
 
-- [ ] 补齐运行与测试依赖声明，减少首次安装时的额外步骤。
-- [ ] 清理并校验 `.env.example`，让配置模板与 `Settings` 字段保持一致。
-- [ ] 持续完善 Router、RAG 与端到端评测集。
-- [ ] 扩大故障注入覆盖范围，持续验证部分失败与上下文溢出路径。
-- [ ] 恢复或重新设计 MCP 服务端集成方案。
+1. `app/api/routes.py` — 请求入口、幂等、SSE
+2. `app/services/session_manager.py` — 会话与并发边界
+3. `app/multi_agent/orchestrator.py` — 一次请求的完整编排
+4. `app/multi_agent/router.py` — 场景分流
+5. `app/multi_agent/agents.py` — 手写 ReAct 循环
+6. `app/multi_agent/context_pack.py` — 上下文打包与历史工具调用投影
+7. `app/agent/tools/manager.py` · `registry.py` · `validation.py` — 工具系统与三道闸门
+8. `app/agent/context_budget.py` · `compaction.py` — 预算与事务式压缩
+9. `app/agent/rag/retriever.py` · `milvus_backend.py` — 混合检索
+10. `app/services/product_sync.py` · `app/worker.py` — 增量同步
+11. `app/db/session_repo.py` — 会话持久化
+12. `frontend-react/src/pages/ChatPage.tsx` — 前端总控
 
-## 🤝 贡献
-
-欢迎通过 Issue 反馈问题、提出改进建议，或提交 Pull Request。涉及架构变更时，建议附上设计理由、测试方式与相应的评测结果。
-
-## 📄 许可证
-
-请以仓库中的 `LICENSE` 文件为准。如果仓库尚未添加许可证，请在发布前明确项目的授权方式。
+</details>
 
 ---
 

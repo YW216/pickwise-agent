@@ -41,3 +41,11 @@ class CompareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     product_ids: list[str] = Field(min_length=2, max_length=4)
+
+
+class SessionIdRequest(BaseModel):
+    """请求中指定当前会话；用户身份由服务端凭证确定。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=36, max_length=36)

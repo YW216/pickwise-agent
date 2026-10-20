@@ -213,8 +213,110 @@ def test_product_detail_not_found_is_404(client):
     assert resp.json()["error"]["code"] == "PRODUCT_NOT_FOUND"
 
 
-def test_product_search_requires_query_in_semantic_mode(client):
+def test_favorite_requires_valid_session_ref(client):
     user = _init_user(client)
-    resp = client.get("/api/products/search", headers=_auth_headers(user))
-    assert resp.status_code == 422
-    assert resp.json()["error"]["code"] == "QUERY_REQUIRED"
+    headers = _auth_headers(user)
+    session = client.post("/api/sessions", json={}, headers=headers)
+    assert session.status_code == 201
+    session_id = session.json()["data"]["session_id"]
+    resp = client.post("/api/favorites/ref/BAD", headers=headers,
+                       json={"session_id": session_id})
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "PRODUCT_REF_NOT_FOUND"
+
+
+def test_favorite_detail_uses_user_favorite_product_id(client, monkeypatch):
+    user = _init_user(client)
+
+    async def fake_lookup(database_url, user_id, product_id):
+        assert user_id == user["user_id"]
+        assert product_id == "LP-01"
+        return product_id
+
+    async def fake_detail(product_id, database_url):
+        assert product_id == "LP-01"
+        return {"success": True, "data": {"product": {
+            "product_id": product_id,
+            "name": "测试商品",
+            "brand": "品牌",
+            "category": "笔记本",
+            "price": 100,
+        }}}
+
+    monkeypatch.setattr("app.api.routes.get_favorite_product_id", fake_lookup)
+    monkeypatch.setattr("app.api.routes.get_detail", fake_detail)
+    resp = client.get("/api/favorites/item/LP-01/detail",
+                      headers=_auth_headers(user))
+
+    assert resp.status_code == 200
+    product = resp.json()["data"]["product"]
+    assert product["name"] == "测试商品"
+    assert "product_id" not in product
+
+
+def test_favorites_response_contains_product_id_for_client_actions(client, monkeypatch):
+    user = _init_user(client)
+
+    async def fake_get_favorites(**kwargs):
+        return {"success": True, "data": {
+            "favorites": [{"product_id": "LP-01",
+                           "name": "测试商品", "brand": "品牌", "category": "笔记本",
+                           "price": 100, "summary": "测试"}],
+            "total": 1,
+        }}
+
+    monkeypatch.setattr("app.api.routes.get_user_favorites", fake_get_favorites)
+    resp = client.get("/api/favorites", headers=_auth_headers(user))
+    assert resp.status_code == 200
+    favorite = resp.json()["data"]["favorites"][0]
+    assert favorite["name"] == "测试商品"
+    assert favorite["product_id"] == "LP-01"
+
+
+def test_remove_favorite_uses_user_scoped_product_id(client, monkeypatch):
+    user = _init_user(client)
+    calls = []
+
+    async def fake_remove(database_url, user_id, product_id):
+        calls.append((user_id, product_id))
+        return True
+
+    monkeypatch.setattr("app.api.routes.remove_favorite", fake_remove)
+    resp = client.delete("/api/favorites/item/LP-01",
+                         headers=_auth_headers(user))
+    assert resp.status_code == 200
+    assert resp.json()["data"]["favorited"] is False
+    assert calls == [(user["user_id"], "LP-01")]
+
+
+@pytest.mark.parametrize("action", ["detail", "remove"])
+def test_favorite_actions_cannot_access_another_users_favorite(client, monkeypatch, action):
+    owner = _init_user(client)
+    favorites = {(owner["user_id"], "LP-01")}
+    client.cookies.clear()
+    other = _init_user(client)
+    assert other["user_id"] != owner["user_id"]
+
+    async def fake_lookup(database_url, user_id, product_id):
+        return product_id if (user_id, product_id) in favorites else None
+
+    async def fake_remove(database_url, user_id, product_id):
+        key = (user_id, product_id)
+        if key not in favorites:
+            return False
+        favorites.remove(key)
+        return True
+
+    async def unexpected_detail(*args, **kwargs):
+        pytest.fail("Unowned favorite must not reach the product query")
+
+    monkeypatch.setattr("app.api.routes.get_favorite_product_id", fake_lookup)
+    monkeypatch.setattr("app.api.routes.remove_favorite", fake_remove)
+    monkeypatch.setattr("app.api.routes.get_detail", unexpected_detail)
+    if action == "detail":
+        resp = client.get("/api/favorites/item/LP-01/detail")
+    else:
+        resp = client.delete("/api/favorites/item/LP-01", headers=_auth_headers(other))
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "FAVORITE_NOT_FOUND"
+    assert (owner["user_id"], "LP-01") in favorites

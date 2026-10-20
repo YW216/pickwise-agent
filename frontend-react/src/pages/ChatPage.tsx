@@ -1,10 +1,13 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { List, MagnifyingGlass, X } from '@phosphor-icons/react'
+import { Heart, List, MagnifyingGlass, X } from '@phosphor-icons/react'
 import { streamChat } from '../api/chat'
+import { loadFavoriteDetail, listFavorites, removeFavoriteById } from '../api/favorites'
+import type { FavoriteProduct } from '../api/favorites'
 import { loadProductDetail } from '../api/products'
 import { createSession, deleteSession, initializeIdentity, listSessions, loadMessages } from '../api/sessions'
 import { ChatComposer } from '../components/ChatComposer'
 import { ChatMessage } from '../components/ChatMessage'
+import { FavoritesDrawer } from '../components/FavoritesDrawer'
 import { ProductDetailDrawer } from '../components/ProductDetailDrawer'
 import { RecommendationPanel } from '../components/RecommendationPanel'
 import { SessionList } from '../components/SessionList'
@@ -19,6 +22,9 @@ export function ChatPage() {
   const [detailProduct, setDetailProduct] = useState<RecommendedProduct | null>(null)
   const [detail, setDetail] = useState<ProductDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailKind, setDetailKind] = useState<'recommendation' | 'favorite'>('recommendation')
+  const [favoriteItems, setFavoriteItems] = useState<FavoriteProduct[]>([])
+  const [favoritesOpen, setFavoritesOpen] = useState(false)
   const [composerValue, setComposerValue] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [catalogOpen, setCatalogOpen] = useState(false)
@@ -30,6 +36,15 @@ export function ChatPage() {
   const bootedRef = useRef(false)
   const selectedSessionRef = useRef<string | null>(null)
   const feedRef = useRef<HTMLDivElement>(null)
+
+  async function refreshFavorites() {
+    try {
+      const result = await listFavorites()
+      setFavoriteItems(result.favorites)
+    } catch {
+      setFavoriteItems([])
+    }
+  }
 
   async function refreshSessions() {
     const result = await listSessions()
@@ -65,6 +80,7 @@ export function ChatPage() {
       try {
         await initializeIdentity()
         dispatch({ type: 'INITIALIZED' })
+        void refreshFavorites()
         const sessions = await refreshSessions()
         const preferred = localStorage.getItem(sessionStorageKey)
         const selected = sessions.find((item) => item.session_id === preferred) || sessions[0]
@@ -92,13 +108,13 @@ export function ChatPage() {
   }, [state.messages, state.streaming])
 
   useEffect(() => {
-    if (!sidebarOpen && !catalogOpen) return
+    if (!sidebarOpen && !catalogOpen && !favoritesOpen) return
     function close(event: KeyboardEvent) {
-      if (event.key === 'Escape') { setSidebarOpen(false); setCatalogOpen(false) }
+      if (event.key === 'Escape') { setSidebarOpen(false); setCatalogOpen(false); setFavoritesOpen(false) }
     }
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
-  }, [sidebarOpen, catalogOpen])
+  }, [sidebarOpen, catalogOpen, favoritesOpen])
 
   async function handleCreateSession() {
     if (state.streaming || controllerRef.current) return
@@ -153,6 +169,7 @@ export function ChatPage() {
 
   async function openDetails(product: RecommendedProduct) {
     if (!state.currentSessionId) return
+    setDetailKind('recommendation')
     setDetailProduct(product)
     setDetail(null)
     setDetailLoading(true)
@@ -163,6 +180,40 @@ export function ChatPage() {
       dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '商品详情加载失败' })
     } finally {
       setDetailLoading(false)
+    }
+  }
+
+  async function openFavoriteDetails(favorite: FavoriteProduct) {
+    setFavoritesOpen(false)
+    setDetailKind('favorite')
+    setDetailProduct({
+      ref: favorite.product_id,
+      display_no: 0,
+      name: favorite.name,
+      brand: favorite.brand,
+      category: favorite.category,
+      price: favorite.price,
+      summary: favorite.summary,
+      reason: favorite.summary,
+    })
+    setDetail(null)
+    setDetailLoading(true)
+    try {
+      const result = await loadFavoriteDetail(favorite.product_id)
+      setDetail(result.product)
+    } catch (error) {
+      dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '收藏商品详情加载失败' })
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  async function removeFavorite(favorite: FavoriteProduct) {
+    try {
+      await removeFavoriteById(favorite.product_id)
+      await refreshFavorites()
+    } catch (error) {
+      dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '取消收藏失败' })
     }
   }
 
@@ -201,7 +252,8 @@ export function ChatPage() {
                 onClick={() => setPalette(item.key)} aria-pressed={palette === item.key} title={item.name} aria-label={item.name} />)}
             </div>
             <span className={`live ${!state.initialized || state.error ? 'is-unavailable' : ''}`} role="status">{state.streaming ? '正在分析' : state.error ? '需要处理' : state.initialized ? '会话就绪' : '正在连接'}</span>
-            <button className="icon-button catalog-toggle" type="button" onClick={() => setCatalogOpen(true)} aria-label="打开商品检索" aria-expanded={catalogOpen} title="商品检索"><MagnifyingGlass size={20} /></button>
+            <button className="icon-button catalog-toggle" type="button" onClick={() => setCatalogOpen(true)} aria-label="打开本轮推荐" aria-expanded={catalogOpen} title="本轮推荐"><MagnifyingGlass size={20} /></button>
+            <button className="icon-button favorite-toggle" type="button" onClick={() => setFavoritesOpen(true)} aria-label={`我的收藏，${favoriteItems.length}款商品`} aria-expanded={favoritesOpen} title="我的收藏"><Heart size={20} weight={favoriteItems.length ? 'fill' : 'regular'} /><span>{favoriteItems.length}</span></button>
           </div>
         </header>
 
@@ -221,8 +273,9 @@ export function ChatPage() {
       </section>
 
       <RecommendationPanel products={state.recommendations} selectedRefs={state.selectedRefs} onToggle={toggleCompare} onDetail={openDetails} onCompare={compareSelected} />
+      <FavoritesDrawer open={favoritesOpen} items={favoriteItems} onClose={() => setFavoritesOpen(false)} onRemove={(product) => void removeFavorite(product)} onDetail={(product) => void openFavoriteDetails(product)} />
       {(sidebarOpen || catalogOpen) && <button className="panel-backdrop" type="button" aria-label="关闭侧栏" tabIndex={-1} onClick={() => { setSidebarOpen(false); setCatalogOpen(false) }} />}
-      <ProductDetailDrawer product={detailProduct} detail={detail} loading={detailLoading} onClose={() => setDetailProduct(null)} onCompare={() => { if (detailProduct) toggleCompare(detailProduct.ref); setDetailProduct(null) }} />
+      <ProductDetailDrawer product={detailProduct} detail={detail} loading={detailLoading} onClose={() => setDetailProduct(null)} onCompare={detailKind === 'recommendation' ? () => { if (detailProduct) toggleCompare(detailProduct.ref); setDetailProduct(null) } : undefined} />
     </main>
   )
 }
