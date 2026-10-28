@@ -22,6 +22,7 @@
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -213,6 +214,11 @@ def main() -> None:
         "--no-save", action="store_true", help="不落盘 runs/ 与 report.json",
     )
     parser.add_argument(
+        "--runs-dir", default=None,
+        help="轨迹落盘目录（默认 app/evaluation/runs）。做 A/B 对照时指定不同目录，"
+             "避免两次跑批互相覆盖，如 --runs-dir app/evaluation/runs_projection_off",
+    )
+    parser.add_argument(
         "--no-report", action="store_true",
         help="关闭 Langfuse 上报（离线/不想产生云端数据时用）",
     )
@@ -221,6 +227,10 @@ def main() -> None:
     print("=" * 78)
     print("  PickWise 端到端评估（规则判分，LLM 仅被测对象）")
     print(f"  被测模型: {settings.model_name} | 时间: {datetime.now():%Y-%m-%d %H:%M:%S}")
+    # 隔离实验的 A/B 分组由环境变量决定，跑批头必须打印：
+    # 两次跑批只差一个环境变量，落盘目录再像也分不清哪次是哪个组
+    projection_off = bool(os.environ.get("DISABLE_CONTEXT_PROJECTION", "").strip())
+    print(f"  历史投影: {'关闭（对照组，泄漏路径直通）' if projection_off else '开启（生产行为）'}")
     print("=" * 78)
 
     if args.self_test:
@@ -260,13 +270,14 @@ def main() -> None:
     _print_report(report)
 
     if not args.no_save:
-        RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        runs_dir = Path(args.runs_dir) if args.runs_dir else RUNS_DIR
+        runs_dir.mkdir(parents=True, exist_ok=True)
         # 清理已下线用例的陈旧轨迹：全量跑批时删除不属于本轮用例集的旧文件，
         # 否则后续分析会把历史文件当成本轮结果（2026-09-16 误判过一次）
         if not args.case_id:
             keep = {f"{r.case_id}.json" for r in report.results if r.trace}
             stale = [
-                p for p in RUNS_DIR.glob("*.json")
+                p for p in runs_dir.glob("*.json")
                 if p.name not in keep and p.name != "report.json"
             ]
             for p in stale:
@@ -276,17 +287,17 @@ def main() -> None:
         for r in report.results:
             if r.trace is None:
                 continue
-            path = RUNS_DIR / f"{r.case_id}.json"
+            path = runs_dir / f"{r.case_id}.json"
             path.write_text(
                 json.dumps(r.trace.to_dict(), ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-        report_path = RUNS_DIR / "report.json"
+        report_path = runs_dir / "report.json"
         report_path.write_text(
             json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        print(f"\n   轨迹与报告已落盘: {RUNS_DIR}")
+        print(f"\n   轨迹与报告已落盘: {runs_dir}")
 
     if reporter.enabled:
         reporter.flush()  # 异步批量上报，退出前落地

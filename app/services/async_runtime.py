@@ -59,6 +59,11 @@ class AsyncRuntime:
         PG 异步池由 ``app.db.connection`` 按需惰性创建（阶段五起），
         不再挂在本容器上——工具层拿不到 app.state，模块级池是唯一可行归属。
         """
+        """
+        if self._model_client is not None防重复打开
+        `open()` 只应由 lifespan 启动时调用一次，若已有客户端说明被重复调用，直接抛错暴露问题，
+        而不是静默创建第二个客户端（泄漏连接）。
+        """
         if self._model_client is not None:
             raise RuntimeError("AsyncRuntime 已经打开")
         self._model_client = AsyncOpenAI(

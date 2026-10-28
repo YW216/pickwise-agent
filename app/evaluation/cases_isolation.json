@@ -3,92 +3,326 @@
     "purpose": "历史降级回归集：验证「跨 Agent 历史工具名泄漏」是否被真正消除",
     "background": "多 Agent 共享 raw_messages，其中含其他 Agent 的 tool_calls 轨迹。模型看到邻居用过某工具会模仿去调它，而执行层按白名单必然拒收（fail「未知工具」），白费一轮 LLM。修复手段是 _project_history——按 Agent 白名单把越权工具块折叠为中性文本（2026-10-07）。",
     "why_separate": "主集 cases.json 的 20 条**测不出**这个机制：17 条单轮（无历史可降级），multiturn_reference_price / multiturn_budget_change 两轮都是 presale（同 Agent，工具全在白名单内不触发）。20 条里唯一可能触发的是 multiturn_switch_consult，但其 turn2 是纯知识问句（OLED/IPS），无「再搜商品」意图 → 不诱发模仿。",
-    "how_to_compare": "同一份用例集跑两次：git stash push app/multi_agent/context_pack.py（降级前）→ run → git stash pop（降级后）→ run。对比 '工具调用序列' 与 '是否出现被拒(失败)调用'。",
-    "pass_criterion": "降级前出现「被拒的 search_products 调用」（模型模仿越权），降级后消失。注意：单次运行不足以定论，LLM 有随机性，建议各跑 3 次取均值。",
-    "not_in_pass": "expected_route / expected_tools 只保证用例本身能被正常判分，**核心证据是 tool_observations 里的被拒调用**，不是 pass/fail。"
+    "how_to_compare": "同一份用例集跑两次，投影开关由环境变量 DISABLE_CONTEXT_PROJECTION 控制（2026-10-21 起不再靠 git stash 切代码）：置 1 = 关投影（对照组，历史原样暴露），不设 = 开投影（生产行为）。两次用 --runs-dir 落到不同目录，再用 app/scripts/analyze_isolation.py 出对比表。",
+    "pass_criterion": "关投影组出现「被拒的越权工具调用」（success=false 且 error 含「未知工具」），开投影组应为 0；同 Agent 对照组（leak_control_*）两组都必须保持正常工具轨迹。注意 LLM 有随机性，单次运行不足以定论，建议各跑 2~3 次。",
+    "not_in_pass": "expected_route / expected_tools 只保证用例本身能被正常判分，**核心证据是 tool_observations 里的被拒调用**，不是 pass/fail。judge 刻意不启用：本实验只看工具轨迹，不需要主观质量分。",
+    "design_constraint": "探针必须让 consult **单独**执行且语义上需要 presale 独占工具，否则测不出泄漏。2026-10-21 实测路由：凡含「再搜/列一下/对比/推荐」的商品诉求，router 规则 4 一律判给 presale（这是**设计好的**防火墙：咨询没有商品检索工具），consult 只拿到知识/政策部分——搜索活被 presale 干了，consult 无从越权。因此有效探针的形态是「政策问句 + 依赖偏好/商品数据」，如「我收藏的那款保修几年」：归 consult（规则 4/6），但要回答就必须拿到收藏夹（presale 独占）。",
+    "probe_types": {
+      "G": "偏好定位型（主力探针）：政策问题里嵌「我收藏的那款 / 我之前说想要的」，consult 要答必须先定位用户偏好 → 诱发 get_user_favorites / recall_user_memory",
+      "H": "费用/价格型：分期、价保等售后费用问题，可能需要商品价格数据",
+      "I": "显式重搜型（负对照）：明确搜索 + 知识诉求，router 会派 presale 承担检索 → consult 无越权机会，用于说明「不泄漏也可能是任务没落到 consult」",
+      "J": "多轮累积：presale 跑过若干轮后再切 consult，历史里泄漏符号最多，压力最大",
+      "F": "对照锚点：全程同 Agent，投影不应改动其轨迹（防误伤）"
+    },
+    "shared_tools_note": "get_detail / retrieve_knowledge / load_skill 是 presale 与 consult 共享工具，调它们**不算越权**。真正的越权探针只有 presale 独占的 5 个：search_catalog / search_products / compare_products / get_user_favorites / recall_user_memory（consult 独占 0 个，故 presale 不存在被诱导越权的可能）。",
+    "effective_sample": "统计口径按「有效轮次」：只有该轮路由恰为单 consult 的轮次才算有效探针；多 Agent 轮里 consult 只处理知识部分，不构成越权机会。analyze_isolation.py 会单独打印有效轮次数，避免用无效样本稀释结论。"
   },
   "cases": [
     {
-      "id": "leak_probe_explicit_research",
-      "category": "隔离回归",
-      "description": "显式再搜诱饵：turn2 显式说「再帮我搜一下」，诱导 consult 模仿历史中 presale 的 search_products",
+      "id": "leak_G1_favorite_warranty",
+      "category": "隔离回归-G偏好定位",
+      "description": "「我收藏的那款」是 presale 独占语义，consult 要回答必须先取收藏夹 → 最直接的越权探针",
+      "turns": [
+        "推荐一款降噪耳机",
+        "我收藏的那款耳机保修几年"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_user_favorites"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_G2_favorite_warranty_range",
+      "category": "隔离回归-G偏好定位",
+      "description": "收藏里「哪个还在保修期」：需要遍历收藏 + 查保修，两个工具都想用",
+      "turns": [
+        "推荐一款降噪耳机",
+        "我之前收藏的耳机哪个还在保修期内"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_user_favorites"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_G3_memory_config",
+      "category": "隔离回归-G偏好定位",
+      "description": "「我之前说想要的配置」：诱导 recall_user_memory（长期记忆是 presale 侧工具）",
+      "turns": [
+        "推荐一款笔记本",
+        "我之前说想要的配置，保修几年"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "recall_user_memory"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_G4_last_viewed_return",
+      "category": "隔离回归-G偏好定位",
+      "description": "「上次看中的那款」+ 退货政策：跨轮指代要靠记忆/收藏定位商品",
+      "turns": [
+        "推荐一款降噪耳机",
+        "你还记得我上次看中的那款吗，它能退吗"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "recall_user_memory"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_G5_bought_warranty",
+      "category": "隔离回归-G偏好定位",
+      "description": "「我之前买的耳机」+ 保修期内换货：需要订单/商品归属信息",
+      "turns": [
+        "推荐一款耳机",
+        "保修期内坏了怎么换？我之前买的耳机还在保修吗"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_detail"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_G6_return_window",
+      "category": "隔离回归-G偏好定位",
+      "description": "七天无理由 + 「我上周买的耳机」：政策问题绑定具体购买记录",
+      "turns": [
+        "推荐一款耳机",
+        "七天无理由从哪天算起？我上周买的耳机还能退吗"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_detail"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_G7_tradein_value",
+      "category": "隔离回归-G偏好定位",
+      "description": "以旧换新估价 + 「我这款」：估价要商品价格，consult 只有按 ID 查详情",
+      "turns": [
+        "推荐一款降噪耳机",
+        "以旧换新的旧机怎么估价？我这款降噪耳机能抵多少"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_detail"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_G8_invoice_warranty",
+      "category": "隔离回归-G偏好定位",
+      "description": "发票丢失 + 指名型号：按名字查商品是 presale 的能力，consult 只有按 ID 查",
+      "turns": [
+        "推荐一款降噪耳机",
+        "发票丢了还能保修吗？我买的是星海凌霄 Buds Pro"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_detail"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_H1_installment",
+      "category": "隔离回归-H费用型",
+      "description": "分期费用 + 指名型号：算分期价需要商品价格，consult 无按名检索",
+      "turns": [
+        "推荐一款手机",
+        "分期付款怎么算？星海凌霄 Buds Pro 分三期要多少钱"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_detail"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_H2_price_protection",
+      "category": "隔离回归-H费用型",
+      "description": "价保 + 「我刚买的耳机降价了吗」：需要价格数据比对（可能判 multi，作为强弱对照）",
+      "turns": [
+        "推荐一款降噪耳机",
+        "价保怎么申请？我刚买的耳机降价了吗"
+      ],
+      "expected_route": [
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_detail"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_I1_explicit_research",
+      "category": "隔离回归-I显式重搜",
+      "description": "负对照：显式「再搜」会被 router 派给 presale，consult 只拿知识部分 → 这类形态本身不构成越权机会",
       "turns": [
         "推荐一款适合通勤的降噪耳机",
-        "再帮我搜一下有没有更便宜的通勤耳机？"
+        "这款一般保修几年？顺便再帮我搜一下有没有更便宜的"
       ],
       "expected_route": [
         "presale",
-        "presale/consult|consult/presale|consult"
+        "consult|presale/consult|consult/presale"
       ],
-      "expected_tools": [
-        "search_products"
-      ],
-      "valid_ids_only": true,
-      "judge_aspects": [
-        "process"
-      ]
+      "expected_tools": ["search_products", "search_catalog"],
+      "valid_ids_only": true
     },
     {
-      "id": "leak_probe_catalog_mimic",
-      "category": "隔离回归",
-      "description": "换一种越权诱导：turn2 用「列一下在售」暗示穷举，诱发 consult 模仿 presale 的 search_catalog",
+      "id": "leak_I2_catalog_all",
+      "category": "隔离回归-I显式重搜",
+      "description": "负对照：全量列举同样归 presale（规则 4 明文：咨询没有商品检索工具）",
       "turns": [
         "预算5000左右的笔记本有哪些",
-        "把目前在售的都列一下，我慢慢看"
+        "你们的保修政策是什么？把目前在售的都列一下"
       ],
       "expected_route": [
         "presale",
-        "presale/consult|consult/presale|consult"
+        "consult|presale/consult|consult/presale"
       ],
-      "expected_tools": [
-        "search_catalog"
-      ],
-      "valid_ids_only": true,
-      "judge_aspects": [
-        "process"
-      ]
+      "expected_tools": ["search_catalog", "search_products"],
+      "valid_ids_only": true
     },
     {
-      "id": "leak_probe_backtrack",
-      "category": "隔离回归",
-      "description": "第三轮强诱导：连续两轮 presale 后由 consult 接管，turn3 直接要求「再搜一次」——累积历史里越权工具名最多，泄漏压力最大",
+      "id": "leak_I3_compare",
+      "category": "隔离回归-I显式重搜",
+      "description": "负对照：对比需求归 presale，consult 只讲原理",
       "turns": [
-        "推荐一款适合写代码的笔记本",
-        "预算6000左右，有推荐吗",
-        "再搜一下有没有更轻便的"
+        "推荐一款降噪耳机",
+        "降噪原理是什么？把刚才那几款参数对比一下"
       ],
       "expected_route": [
         "presale",
-        "presale/consult|consult/presale|consult",
-        "presale/consult|consult/presale|consult"
+        "consult|presale/consult|consult/presale"
       ],
-      "expected_tools": [
-        "search_products"
+      "expected_tools": ["search_products", "compare_products"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_J1_three_turn",
+      "category": "隔离回归-J多轮累积",
+      "description": "两轮 presale 后切 consult 问收藏：累积历史里越权符号最多",
+      "turns": [
+        "推荐一款降噪耳机",
+        "这款保修几年",
+        "我收藏的那款呢？保修一样吗"
       ],
-      "valid_ids_only": true,
-      "judge_aspects": [
-        "process"
-      ]
+      "expected_route": [
+        "presale",
+        "consult",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_user_favorites"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_J2_four_turn",
+      "category": "隔离回归-J多轮累积",
+      "description": "笔记本场景四轮：两轮 presale → 知识 → 偏好政策",
+      "turns": [
+        "推荐一款笔记本",
+        "预算6000左右，有推荐吗",
+        "OLED 屏伤眼吗",
+        "我收藏的那款屏幕怎么样，保修几年"
+      ],
+      "expected_route": [
+        "presale",
+        "presale",
+        "consult|presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_user_favorites"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_J3_alternate",
+      "category": "隔离回归-J多轮累积",
+      "description": "四轮交替 presale/consult：每轮切换都重新投影一次历史",
+      "turns": [
+        "推荐一款手机",
+        "这手机保修几年",
+        "再推荐个便宜点的",
+        "我收藏的手机能抵多少，以旧换新怎么算"
+      ],
+      "expected_route": [
+        "presale",
+        "consult",
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_user_favorites"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_J4_long",
+      "category": "隔离回归-J多轮累积",
+      "description": "四轮里三次切换，末轮同时要收藏与对比（两个 presale 独占工具）",
+      "turns": [
+        "推荐一款游戏耳机",
+        "低延迟是什么原理",
+        "再帮我搜个更轻的",
+        "我收藏的两款对比一下，哪个保修更长"
+      ],
+      "expected_route": [
+        "presale",
+        "consult",
+        "presale",
+        "consult|presale/consult|consult/presale"
+      ],
+      "expected_tools": ["search_products", "get_user_favorites"],
+      "valid_ids_only": true
     },
     {
       "id": "leak_control_same_agent",
-      "category": "隔离回归",
-      "description": "对照组：两轮都走 presale（同 Agent，工具全在白名单内）——降级**不应**触发，工具轨迹必须完整保留。这条是防误伤的锚点，若它也变了说明降级范围写宽了。",
+      "category": "隔离回归-F对照",
+      "description": "对照组：两轮都走 presale（同 Agent，工具全在白名单内）——投影**不应**改动其轨迹。这条是防误伤的锚点，若它也变了说明投影范围写宽了。",
       "turns": [
         "推荐一款适合通勤的降噪耳机",
         "再帮我搜一下有没有更便宜的通勤耳机？"
       ],
-      "expected_route": [
-        "presale",
-        "presale"
+      "expected_route": ["presale", "presale"],
+      "expected_tools": ["search_products"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_control_presale_3turn",
+      "category": "隔离回归-F对照",
+      "description": "对照组：三轮全 presale，含预算追加与再搜——检验投影不影响同 Agent 的多轮检索",
+      "turns": [
+        "推荐一款笔记本",
+        "预算6000左右，有推荐吗",
+        "再搜一下更轻便的"
       ],
-      "expected_tools": [
-        "search_products"
+      "expected_route": ["presale", "presale", "presale"],
+      "expected_tools": ["search_products", "search_catalog"],
+      "valid_ids_only": true
+    },
+    {
+      "id": "leak_control_presale_compare",
+      "category": "隔离回归-F对照",
+      "description": "对照组：presale 自己调 compare_products（合法）——投影若把它折叠掉即为误伤",
+      "turns": [
+        "推荐两款降噪耳机",
+        "把这两款参数对比一下"
       ],
-      "valid_ids_only": true,
-      "judge_aspects": [
-        "process"
-      ]
+      "expected_route": ["presale", "presale"],
+      "expected_tools": ["search_products", "compare_products"],
+      "valid_ids_only": true
     }
   ]
 }

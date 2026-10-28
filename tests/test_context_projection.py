@@ -174,3 +174,29 @@ def test_projection_is_idempotent_and_readonly():
     assert [m.get("content") for m in once[1:]] == [m.get("content") for m in twice[1:]]
     # 原 list 及其元素未被就地改写
     assert history == snapshot
+
+
+def test_project_history_false_exposes_raw_history():
+    """对照开关（2026-10-21）：project_history=False 时历史原样暴露。
+
+    这是 A/B 实验的「关投影」组——语义上必须**完整保留**其他 Agent 的
+    tool_calls，否则对照组不成立（没有工具名就没有可模仿的符号）。
+    同时它必须只影响本函数输出，不能改动 pack.history 这条事实链。
+    """
+    cfg = AGENT_CONFIGS["consult"]
+    history = _foreign_history()
+    pack = ContextPack(history=history, summary=None,
+                       memory_sections=[], skill_catalog="")
+
+    msgs = build_working_messages(pack, cfg, "single", project_history=False)
+
+    # system + 全部 5 条历史，一条不少
+    assert len(msgs) == 1 + len(history)
+    tool_call_names = [
+        tc["function"]["name"]
+        for m in msgs
+        for tc in (m.get("tool_calls") or [])
+    ]
+    assert "search_products" in tool_call_names, "对照组必须能看到越权工具名"
+    # 事实层未被改写
+    assert history[1]["tool_calls"][0]["function"]["name"] == "search_products"

@@ -61,8 +61,13 @@ class MultiAgentOrchestrator:
         database_url: str | None = None,
         client=None,
         persistence_enabled: bool = True,
+        disable_context_projection: bool = False,
     ):
         self.persistence_enabled = persistence_enabled
+        # 历史投影开关（仅评测用，2026-10-21）：True = 关闭 _project_history，
+        # 把其他 Agent 的 tool_calls 原样喂给模型——用于隔离泄漏的 A/B 对照。
+        # 生产恒为 False；由评估沙箱按环境变量注入，不暴露给业务调用方。
+        self.disable_context_projection = disable_context_projection
         self.identity = identity
         if identity is not None:
             if session_path is not None or memory_dir is not None or user_id is not None:
@@ -508,7 +513,10 @@ class MultiAgentOrchestrator:
             # 技能目录按 Agent 归属过滤（pack 共享只读，per-agent 目录用轻量副本注入）
             agent_pack = replace(pack, skill_catalog=self._skill_catalog_for(key))
             try:
-                messages = build_working_messages(agent_pack, AGENT_CONFIGS[key], mode)
+                messages = build_working_messages(
+                    agent_pack, AGENT_CONFIGS[key], mode,
+                    project_history=not self.disable_context_projection,
+                )
 
                 _, new_messages = await agent.handle(
                     messages, max_steps=self.max_react_steps,
@@ -623,7 +631,10 @@ class MultiAgentOrchestrator:
         for key, cfg in AGENT_CONFIGS.items():
             agent_pack = replace(pack, skill_catalog=self._skill_catalog_for(key))
             for mode in ("single", "multi"):
-                messages = build_working_messages(agent_pack, cfg, mode)
+                messages = build_working_messages(
+                    agent_pack, cfg, mode,
+                    project_history=not self.disable_context_projection,
+                )
                 tool_defs = self.agents[key].tool_manager.tool_definitions
                 estimates.append(
                     estimate_messages_tokens(messages)

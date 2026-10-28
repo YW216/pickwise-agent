@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 @dataclass
 class ContextPack:
-       """一次请求的完整上下文。构建一次，N 个 Agent 各取全量。"""
+    """一次请求的完整上下文。构建一次，N 个 Agent 各取全量。"""
 
     history: list[dict]          # 本轮进入上下文的消息窗口（含刚追加的 user 消息；只读引用）
     summary: str | None          # 历史压缩摘要（六段叙述，被压缩段的代表；纯 LLM 叙述）
@@ -31,17 +31,23 @@ class ContextPack:
     product_block: str = ""      # 商品记忆渲染块（product_tracker.format_products_block），可为 ""
 
 
-def build_working_messages(pack: ContextPack, cfg: dict, mode: str) -> list[dict]:
+def build_working_messages(
+    pack: ContextPack, cfg: dict, mode: str, project_history: bool = True,
+) -> list[dict]:
     """用 pack + Agent 配置组装该 Agent 的 working messages。
 
     Args:
         pack：本轮上下文（orchestrator._build_pack() 的产物，多 Agent 共享同一引用）
         cfg：AGENT_CONFIGS[key]，取 cfg["prompts"][mode] 作 system prompt
         mode："single" | "multi"（P2 阶段恒为 single，P3 起按场景数选择）
+        project_history：是否按白名单投影 history。默认 True（生产行为）；
+            False 是**评测专用**的对照组开关——把其他 Agent 的 tool_calls
+            原样喂进来，复现"工具名泄漏 → 模型模仿 → 执行层拒收"的因果链，
+            用于证明投影确实消除了该现象。业务代码不应传 False。
 
     Returns:
         消息列表，固定顺序：system(prompt) + system(skill) + memory 段
-        + summary 段 + product_block 段 + history 全量。空字段对应段直接省略。
+        + summary 段 + product_block 段 + history 全量/投影视图。空字段对应段直接省略。
     """
     messages = [{"role": "system", "content": cfg["prompts"][mode]}]
     if pack.skill_catalog:
@@ -60,7 +66,11 @@ def build_working_messages(pack: ContextPack, cfg: dict, mode: str) -> list[dict
                 f"价格为历史价、不代表现价）：\n{pack.product_block}"
             ),
         })
-    messages.extend(_project_history(pack.history, cfg.get("tools") or ()))
+    if project_history:
+        messages.extend(_project_history(pack.history, cfg.get("tools") or ()))
+    else:
+        # 对照组：不做投影，历史原样暴露（含其他 Agent 的工具名）。仅评测使用。
+        messages.extend(pack.history)
     return messages
 
 

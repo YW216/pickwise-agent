@@ -32,6 +32,9 @@ class ToolObservation:
     name: str
     arguments: dict
     result: str | dict  # execute_tool 的信封（沙箱采集为 dict；判分器兼容两种形态）
+    # 发起该调用的 Agent key（presale / consult）。多 Agent 轮里同一轮有两个 Agent
+    # 的调用混在一条序列里，没有归属就无法按白名单判"谁越权了"（2026-10-21 加）。
+    agent: str = ""
 
 
 @dataclass
@@ -112,7 +115,12 @@ class RunTrace:
                 for c in self.llm_calls
             ],
             "tool_calls": [
-                {"name": obs.name, "arguments": obs.arguments, "result": obs.result}
+                {
+                    "agent": obs.agent,
+                    "name": obs.name,
+                    "arguments": obs.arguments,
+                    "result": obs.result,
+                }
                 for obs in self.tool_observations
             ],
             "tool_boundaries": self.tool_boundaries,
