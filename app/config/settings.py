@@ -97,12 +97,13 @@ class Settings(BaseSettings):
     web_session_dir: str = "app/sessions/web"
 
     # ---------- Web 服务（第四步，多租户隔离和fastapi接入.md §4） ----------
-    # 匿名凭证签名密钥：至少 32 字节高强度随机材料；Web 启动时缺失或过弱
-    # 明确失败（不临时生成——密钥跨重启必须稳定，否则已签发凭证全部失效）。
-    auth_secret_key: str = ""
-    # 匿名凭证有效期（天）与 Cookie Secure 标记（HTTPS 部署置 true）。
-    auth_cookie_max_age_days: int = 30
+    # Server-side login session lifetime and Cookie Secure flag.
+    auth_session_max_age_days: int = 30
     auth_cookie_secure: bool = False
+    # Deprecated, ignored; retained so existing local .env files continue to load.
+    auth_secret_key: str = ""
+    # Legacy .env compatibility only; never used for authentication.
+    auth_secret_key: str = ""
     # 允许的前端 Origin（CORS 与 CSRF 校验共用）；空列表 = 仅同源访问。
     allowed_origins: list[str] = []
     # 聊天幂等记录保留时间；超过窗口后允许同一键重新开始一次请求。
@@ -204,16 +205,9 @@ class Settings(BaseSettings):
             )
 
     def assert_auth_configured(self) -> None:
-        """Web 服务启动时使用：签名密钥缺失或过弱都阻止启动（§4.2）。"""
-        if not self.auth_secret_key:
-            raise RuntimeError(
-                self._MISSING_CREDENTIAL.format(key="AUTH_SECRET_KEY")
-            )
-        if len(self.auth_secret_key.encode()) < 32:
-            raise RuntimeError(
-                "AUTH_SECRET_KEY 过弱：至少 32 字节高强度随机材料"
-                "（如 python -c \"import secrets; print(secrets.token_urlsafe(48))\"）"
-            )
+        """Validate server-side login session policy at startup."""
+        if self.auth_session_max_age_days < 1:
+            raise RuntimeError("AUTH_SESSION_MAX_AGE_DAYS 必须至少为 1 天")
 
     # 已知无 embedding 端点的 provider 主机名片段（实测 DeepSeek 返回 404，
     # 官方定价页截至 2026-08 也只列对话模型）。用于把「回退不可用」

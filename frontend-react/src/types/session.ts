@@ -16,9 +16,3 @@ export interface SessionSummary {
   updated_at: string
   last_message_at: string | null
 }
-
-export interface AnonymousIdentity {
-  user_id: string
-  csrf_token: string
-  expires_at: string
-}

@@ -1,29 +1,20 @@
-"""FastAPI 依赖函数（多租户隔离和fastapi接入.md §4.1/§4.3）。
-
-依赖从 request.app.state 读取运行对象（lifespan 创建），不在模块 import
-时创建——每个 create_app() 实例拥有自己的 SessionManager 与 Auth，
-测试可通过 override 或重建 app 隔离，绝不通过全局单例意外共享。
-"""
+"""FastAPI dependencies for server-side authentication and CSRF checks."""
 
 from __future__ import annotations
 
+import secrets
+
 from fastapi import Depends, HTTPException, Request
 
-from app.api.auth import (
-    CSRF_HEADER,
-    COOKIE_NAME,
-    AnonymousAuth,
-    AnonymousIdentity,
-    AuthError,
-)
+from app.api.auth import AuthError, AuthenticatedUser, COOKIE_NAME, CSRF_HEADER
 from app.api.envelope import clear_auth_cookie
 from app.config.settings import settings
 from app.services.session_manager import SessionManager
 from app.services.session_service import SessionService
 
 
-def get_auth(request: Request) -> AnonymousAuth:
-    return request.app.state.auth
+def get_auth_service(request: Request):
+    return request.app.state.auth_service
 
 
 def get_session_manager(request: Request) -> SessionManager:
@@ -37,38 +28,39 @@ def get_session_service(request: Request) -> SessionService:
     return service
 
 
-def _unauthorized(message: str) -> HTTPException:
-    """401 附带失效 Cookie 清除头（相同 Path，HttpOnly 也能删）。"""
-    return HTTPException(status_code=401, detail=message,
-                         headers=clear_auth_cookie())
+async def get_current_user(request: Request) -> AuthenticatedUser | None:
+    token = request.cookies.get(COOKIE_NAME)
+    session = await get_auth_service(request).authenticate(token)
+    if session is None:
+        return None
+    user, csrf_token, expires_at = session
+    request.state.csrf_token = csrf_token
+    request.state.auth_expires_at = expires_at
+    return user
 
 
-def get_current_user(
+async def require_authenticated_user(
     request: Request,
-    auth: AnonymousAuth = Depends(get_auth),
-) -> AnonymousIdentity:
-    """从签名 Cookie 取得可信身份；缺失/非法/过期 → 401 并清除 Cookie。"""
-    signed = request.cookies.get(COOKIE_NAME)
-    if not signed:
-        raise _unauthorized("缺少匿名凭证")
-    try:
-        return auth.verify(signed)
-    except AuthError as exc:
-        raise _unauthorized(str(exc)) from exc
-
-
-def require_csrf(
-    request: Request,
-    user: AnonymousIdentity = Depends(get_current_user),
-) -> AnonymousIdentity:
-    """写请求的 CSRF 与来源校验（/auth/anonymous 是唯一引导例外）。"""
-    try:
-        get_auth(request).verify_csrf(
-            user,
-            request.headers.get(CSRF_HEADER),
-            request.headers.get("origin"),
-            settings.allowed_origins,
+    user: AuthenticatedUser | None = Depends(get_current_user),
+) -> AuthenticatedUser:
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "LOGIN_REQUIRED", "message": "请先登录"},
+            headers=clear_auth_cookie(),
         )
-    except AuthError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return user
+
+
+async def require_csrf(
+    request: Request,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+) -> AuthenticatedUser:
+    expected = getattr(request.state, "csrf_token", "")
+    supplied = request.headers.get(CSRF_HEADER, "")
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="CSRF 校验失败")
+    origin = request.headers.get("origin")
+    if origin and settings.allowed_origins and origin not in settings.allowed_origins:
+        raise HTTPException(status_code=403, detail="来源不在允许列表内")
     return user

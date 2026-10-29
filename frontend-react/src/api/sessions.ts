@@ -1,13 +1,6 @@
-import type { AnonymousIdentity, SessionSummary, VisibleMessage } from '../types/session'
+import type { SessionSummary, VisibleMessage } from '../types/session'
 import type { RecommendedProduct } from '../types/product'
-import { requestJson, setCsrfToken } from './client'
-
-export function initializeIdentity(): Promise<AnonymousIdentity> {
-  return requestJson<AnonymousIdentity>('/api/auth/anonymous', { method: 'POST' }).then((identity) => {
-    setCsrfToken(identity.csrf_token)
-    return identity
-  })
-}
+import { requestJson } from './client'
 
 export function listSessions(): Promise<{ sessions: SessionSummary[] }> {
   return requestJson('/api/sessions')

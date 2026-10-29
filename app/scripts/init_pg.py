@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 from app.db.catalog_repo import init_schema_and_seed, load_full_catalog  # noqa: E402
 from app.db.connection import ping  # noqa: E402
 from app.db.session_schema import ensure_session_schema  # noqa: E402
+from app.db.auth_repo import ensure_auth_schema  # noqa: E402
 from app.db.user_repo import init_user_schema  # noqa: E402
 from app.services.idempotency import ensure_schema as ensure_chat_idempotency_schema  # noqa: E402
 from app.config.settings import settings  # noqa: E402
@@ -67,6 +68,8 @@ def main():
     imported = init_user_schema(url, legacy_user_id=settings.memory_user_id)
     ensure_session_schema(url)
     print("会话表已就绪（sessions.messages JSONB 快照）")
+    ensure_auth_schema(url)
+    print("用户和登录 Session 表已就绪")
     ensure_chat_idempotency_schema(url)
     print("聊天幂等表已就绪")
     print(f"用户收藏表已就绪，本次导入原 CLI 收藏 {imported} 条")

@@ -3,6 +3,7 @@ export interface ApiEnvelope<T> {
   data?: T
   error?: { code?: string; message?: string } | string | null
   request_id?: string
+  detail?: unknown
 }
 
 export class ApiError extends Error {
@@ -19,6 +20,10 @@ export class ApiError extends Error {
   }
 }
 
+export function notifyLoginRequired() {
+  window.dispatchEvent(new CustomEvent('pickwise:login-required'))
+}
+
 let csrfToken = ''
 
 export function setCsrfToken(token: string) {
@@ -33,7 +38,12 @@ export function csrfHeaders(headers: HeadersInit = {}): Headers {
 
 function errorMessage(payload: ApiEnvelope<unknown>, status: number): string {
   if (typeof payload.error === 'string') return payload.error
-  return payload.error?.message || `请求失败（${status}）`
+  if (payload.error?.message) return payload.error.message
+  if (payload.detail && typeof payload.detail === 'object' && 'message' in payload.detail) {
+    return String((payload.detail as { message: unknown }).message)
+  }
+  if (typeof payload.detail === 'string') return payload.detail
+  return `请求失败（${status}）`
 }
 
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -50,6 +60,16 @@ export async function requestJson<T>(path: string, init: RequestInit = {}): Prom
     credentials: 'same-origin',
   })
   const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<T>
+  if (response.status === 401) {
+    const detail = payload.detail
+    const detailCode = detail && typeof detail === 'object' && 'code' in detail
+      ? (detail as { code?: unknown }).code
+      : undefined
+    if (payload.error && typeof payload.error === 'object' && payload.error.code === 'LOGIN_REQUIRED'
+      || detailCode === 'LOGIN_REQUIRED') {
+      notifyLoginRequired()
+    }
+  }
   if (!response.ok || payload.success !== true) {
     throw new ApiError(
       errorMessage(payload, response.status),

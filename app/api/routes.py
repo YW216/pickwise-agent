@@ -20,14 +20,16 @@ from app.agent.tools.favorites import get_user_favorites
 from app.agent.tools.search_products import search_products
 from app.api.auth import (
     COOKIE_NAME,
-    AnonymousIdentity,
+    AuthenticatedUser,
     AuthError,
+    EmailAlreadyRegistered,
 )
 from app.api.deps import (
-    get_auth,
     get_current_user,
+    get_auth_service,
     get_session_manager,
     get_session_service,
+    require_authenticated_user,
     require_csrf,
 )
 from app.api.envelope import (
@@ -37,7 +39,10 @@ from app.api.envelope import (
     session_error,
     success,
 )
-from app.api.schemas import ChatRequest, CompareRequest, SessionIdRequest, SessionCreateRequest
+from app.api.schemas import (
+    ChatRequest, CompareRequest, LoginRequest, RegisterRequest,
+    SessionIdRequest, SessionCreateRequest,
+)
 from app.config.settings import settings
 from app.db.catalog_repo import aget_products_by_ids
 from app.db.user_repo import add_favorite, get_favorite_product_id, remove_favorite
@@ -85,51 +90,100 @@ def _public_assistant_text(content: str) -> str:
 def _public_message_content(role: str, content: str) -> str:
     return _public_assistant_text(content) if role == "assistant" else content
 
-# ---------- 匿名身份（CSRF 引导例外：不要求先有 CSRF 值，§4.3） ----------
+# ---------- 正式账号与服务端登录 Session ----------
 
-@auth_router.post("/anonymous")
-async def anonymous_auth(
-    request: Request,
-    auth=Depends(get_auth),
-):
-    """无有效 Cookie 时签发新身份；已有有效凭证则复用（不延长有效期）。"""
-    request_id = new_request_id()
-    signed = request.cookies.get(COOKIE_NAME)
-    if signed:
-        try:
-            identity = auth.verify(signed)
-        except AuthError:
-            # 失效/被篡改：401 + 服务端清除失效 Cookie，不直接签发新身份
-            resp = error(401, "AUTH_INVALID",
-                         "匿名凭证已失效，请确认后重新进入", request_id)
-            resp.headers.update(clear_auth_cookie())
-            return resp
-        resp = success(_auth_payload(identity), request_id)
-        # 复用原凭证：同一个 CSRF 值与真实到期信息，不延长原期限（§4.2）
-        resp.set_cookie(
-            COOKIE_NAME, signed,
-            max_age=max(0, int(identity.expires_at - time.time())),
-            httponly=True, samesite="lax", secure=settings.auth_cookie_secure,
-            path="/api",
-        )
-        return resp
+def _auth_payload(user: AuthenticatedUser, csrf_token: str, expires_at: float) -> dict:
+    return {
+        "authenticated": True,
+        "user": {
+            "user_id": user.user_id,
+            "email": user.email,
+            "display_name": user.display_name,
+        },
+        "csrf_token": csrf_token,
+        "expires_at": expires_at,
+    }
 
-    identity, signed_value = auth.issue()
-    resp = success(_auth_payload(identity), request_id)
-    resp.set_cookie(
-        COOKIE_NAME, signed_value, max_age=int(auth.max_age_seconds),
-        httponly=True, samesite="lax", secure=settings.auth_cookie_secure,
+
+def _set_login_cookie(response: JSONResponse, token: str, expires_at: float) -> None:
+    response.set_cookie(
+        COOKIE_NAME, token,
+        max_age=max(0, int(expires_at - time.time())),
+        expires=max(0, int(expires_at - time.time())),
+        httponly=True,
+        samesite="lax",
+        secure=settings.auth_cookie_secure,
         path="/api",
     )
-    return resp
 
 
-def _auth_payload(identity: AnonymousIdentity) -> dict:
-    return {
-        "user_id": identity.user_id,
-        "csrf_token": identity.csrf_token,
-        "expires_at": identity.expires_at,
-    }
+@auth_router.post("/register")
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    auth=Depends(get_auth_service),
+):
+    request_id = new_request_id()
+    try:
+        user, token, csrf_token, expires_at = await auth.register(
+            body.email, body.password, body.display_name,
+        )
+    except EmailAlreadyRegistered as exc:
+        return error(409, "EMAIL_ALREADY_REGISTERED", str(exc), request_id)
+    except AuthError as exc:
+        return error(422, "AUTH_INPUT_INVALID", str(exc), request_id)
+    response = success(_auth_payload(user, csrf_token, expires_at), request_id, 201)
+    _set_login_cookie(response, token, expires_at)
+    return response
+
+
+@auth_router.post("/login")
+async def login(
+    body: LoginRequest,
+    request: Request,
+    auth=Depends(get_auth_service),
+):
+    request_id = new_request_id()
+    try:
+        user, token, csrf_token, expires_at = await auth.login(body.email, body.password)
+    except AuthError as exc:
+        return error(401, "INVALID_CREDENTIALS", str(exc), request_id)
+    response = success(_auth_payload(user, csrf_token, expires_at), request_id)
+    _set_login_cookie(response, token, expires_at)
+    return response
+
+
+@auth_router.get("/me")
+async def current_user(
+    request: Request,
+    user: AuthenticatedUser | None = Depends(get_current_user),
+):
+    request_id = new_request_id()
+    if user is None:
+        response = success({"authenticated": False, "user": None}, request_id)
+        if request.cookies.get(COOKIE_NAME):
+            response.headers.update(clear_auth_cookie())
+        return response
+    expires_at = request.state.auth_expires_at
+    return success({
+        "authenticated": True,
+        "user": {"user_id": user.user_id, "email": user.email,
+                 "display_name": user.display_name},
+        "csrf_token": request.state.csrf_token,
+        "expires_at": expires_at,
+    }, request_id)
+
+
+@auth_router.post("/logout")
+async def logout(
+    request: Request,
+    user: AuthenticatedUser = Depends(require_csrf),
+    auth=Depends(get_auth_service),
+):
+    await auth.logout(request.cookies.get(COOKIE_NAME))
+    response = success({"authenticated": False}, new_request_id())
+    response.headers.update(clear_auth_cookie())
+    return response
 
 
 # ---------- 会话与聊天 ----------
@@ -138,7 +192,7 @@ def _auth_payload(identity: AnonymousIdentity) -> dict:
 async def create_session(
     body: SessionCreateRequest,
     request: Request,
-    user: AnonymousIdentity = Depends(require_csrf),
+    user: AuthenticatedUser = Depends(require_csrf),
     manager: SessionManager = Depends(get_session_manager),
 ):
     """创建窗口：服务端生成 UUID 并持久化空会话归属；不调用模型。"""
@@ -169,7 +223,7 @@ async def create_session(
 @sessions_router.get("")
 async def list_sessions(
     request: Request,
-    user: AnonymousIdentity = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
     service: SessionService = Depends(get_session_service),
 ):
     """返回当前用户的会话摘要列表。"""
@@ -257,7 +311,7 @@ async def _with_catalog_prices(cards: list[dict]) -> list[dict]:
 async def session_messages(
     session_id: str,
     request: Request,
-    user: AnonymousIdentity = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
     service: SessionService = Depends(get_session_service),
 ):
     """返回当前用户可见的历史消息与右侧推荐卡片，不暴露 tool trace。"""
@@ -299,7 +353,7 @@ async def session_messages(
 async def get_session(
     session_id: str,
     request: Request,
-    user: AnonymousIdentity = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
     service: SessionService = Depends(get_session_service),
 ):
     """返回当前用户的会话元数据和可见消息。"""
@@ -338,7 +392,7 @@ async def get_session(
 async def delete_session(
     session_id: str,
     request: Request,
-    user: AnonymousIdentity = Depends(require_csrf),
+    user: AuthenticatedUser = Depends(require_csrf),
     manager: SessionManager = Depends(get_session_manager),
 ):
     """删除当前用户的会话快照。"""
@@ -359,7 +413,7 @@ async def delete_session(
 async def chat(
     body: ChatRequest,
     request: Request,
-    user: AnonymousIdentity = Depends(require_csrf),
+    user: AuthenticatedUser = Depends(require_csrf),
     manager: SessionManager = Depends(get_session_manager),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
@@ -371,7 +425,7 @@ async def chat(
 async def chat_stream(
     body: ChatRequest,
     request: Request,
-    user: AnonymousIdentity = Depends(require_csrf),
+    user: AuthenticatedUser = Depends(require_csrf),
     manager: SessionManager = Depends(get_session_manager),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
@@ -567,7 +621,7 @@ async def _stream_events(events, task):
         # 不取消 task：它还需要保存结果；事件队列有界，断连不会无限堆积。
 
 
-def _identity_for(user: AnonymousIdentity, session_id: str) -> SessionIdentity:
+def _identity_for(user: AuthenticatedUser, session_id: str) -> SessionIdentity:
     """凭证 user_id + 请求方窗口编号组身份；UUID 非法 → 422。
 
     归属隔离由 SessionManager 的文件定位天然保证：窗口文件只会在
@@ -604,7 +658,6 @@ def _chat_response(identity: SessionIdentity, outcome: ChatOutcome,
 @products_router.get("/search")
 async def search_products_route(
     request: Request,
-    user: AnonymousIdentity = Depends(get_current_user),
     mode: str = Query("semantic", pattern="^(semantic|catalog)$"),
     query: str | None = Query(None, max_length=500),
     category: str | None = Query(None),
@@ -636,7 +689,6 @@ async def search_products_route(
 async def product_detail(
     product_id: str,
     request: Request,
-    user: AnonymousIdentity = Depends(get_current_user),
 ):
     """商品完整详情；不存在 404，数据库不可用 503。"""
     request_id = new_request_id()
@@ -650,7 +702,7 @@ async def product_detail(
 async def product_ref_detail(
     product_ref: str,
     session_id: str = Query(..., min_length=36, max_length=36),
-    user: AnonymousIdentity = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
     """使用当前会话推荐引用查询详情，不把内部 product_id 暴露给前端。"""
     request_id = new_request_id()
@@ -668,7 +720,7 @@ async def product_ref_detail(
 async def compare_products_route(
     body: CompareRequest,
     request: Request,
-    user: AnonymousIdentity = Depends(require_csrf),
+    user: AuthenticatedUser = Depends(require_csrf),
 ):
     """一次对比 2~4 个不同商品；缺失 ID 明确失败（422）。"""
     request_id = new_request_id()
@@ -789,7 +841,7 @@ def _public_compare_data(data: dict) -> dict:
 async def favorite_detail(
     product_id: str,
     request: Request,
-    user: AnonymousIdentity = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
     """查询当前用户收藏商品详情；未收藏的商品不能通过此入口查看。"""
     request_id = new_request_id()
@@ -807,7 +859,7 @@ async def favorite_detail(
 @favorites_router.get("")
 async def list_favorites(
     request: Request,
-    user: AnonymousIdentity = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
     category: str | None = Query(None),
     limit: int = Query(20, ge=1, le=50),
 ):
@@ -829,7 +881,7 @@ async def list_favorites(
 async def add_favorite_route(
     product_ref: str,
     body: SessionIdRequest,
-    user: AnonymousIdentity = Depends(require_csrf),
+    user: AuthenticatedUser = Depends(require_csrf),
 ):
     request_id = new_request_id()
     try:
@@ -850,7 +902,7 @@ async def add_favorite_route(
 async def remove_favorite_route(
     product_ref: str,
     body: SessionIdRequest,
-    user: AnonymousIdentity = Depends(require_csrf),
+    user: AuthenticatedUser = Depends(require_csrf),
 ):
     request_id = new_request_id()
     try:
@@ -870,7 +922,7 @@ async def remove_favorite_route(
 @favorites_router.delete("/item/{product_id}")
 async def remove_favorite_item_route(
     product_id: str,
-    user: AnonymousIdentity = Depends(require_csrf),
+    user: AuthenticatedUser = Depends(require_csrf),
 ):
     request_id = new_request_id()
     try:

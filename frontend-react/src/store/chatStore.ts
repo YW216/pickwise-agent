@@ -30,6 +30,7 @@ export const initialChatState: ChatState = {
 
 type Action =
   | { type: 'INITIALIZED' }
+  | { type: 'SESSION_CLEARED' }
   | { type: 'SESSIONS_LOADED'; sessions: SessionSummary[] }
   | { type: 'SESSION_SELECTED'; sessionId: string }
   | { type: 'MESSAGES_LOADED'; messages: VisibleMessage[]; recommendations: RecommendedProduct[] }
@@ -160,7 +161,10 @@ function replaceLastAssistant(messages: VisibleMessage[], content: string): Visi
 export function chatReducer(state: ChatState, action: Action): ChatState {
   switch (action.type) {
     case 'INITIALIZED':
-      return { ...state, initialized: true, error: null }
+      return { ...state, initialized: true, loading: false, error: null }
+    case 'SESSION_CLEARED':
+      return { ...state, sessions: [], currentSessionId: null, messages: [], loading: false,
+        streaming: false, execution: [], recommendations: [], selectedRefs: [], error: null }
     case 'SESSIONS_LOADED':
       return { ...state, sessions: action.sessions }
     case 'SESSION_SELECTED':

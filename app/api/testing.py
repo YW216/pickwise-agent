@@ -1,8 +1,4 @@
-"""测试专用 FastAPI 应用工厂。
-
-生产代码只使用 ``create_app()``。测试需要替换 Agent、鉴权密钥、会话目录或
-幂等存储时，从这里创建隔离应用，避免测试参数进入生产入口。
-"""
+"""Test FastAPI factory with isolated stores and overridable services."""
 
 from __future__ import annotations
 
@@ -11,20 +7,27 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from app.api.app import _build_app
+from app.db.auth_repo import PostgresAuthStore
+from app.config.settings import settings
 
 
-def create_test_app(*, auth_secret_key: str,
-                    session_dir: str | Path,
+def create_test_app(*, session_dir: str | Path,
                     factory=None,
                     idempotency_store=None,
-                    session_service=None) -> FastAPI:
-    """创建测试应用；不读取生产鉴权密钥，也不强制连接 PostgreSQL 会话池。"""
-    if len(auth_secret_key.encode()) < 32:
-        raise ValueError("测试 AUTH_SECRET_KEY 至少 32 字节")
+                    session_service=None,
+                    auth_store=None) -> FastAPI:
+    """Create an isolated test app; auth_store must be injected explicitly."""
+    if auth_store is None:
+        if session_service is None:
+            raise RuntimeError(
+                "create_test_app 需要显式注入 auth_store"
+                "（内存实现见 tests/in_memory_auth_store.py）"
+            )
+        auth_store = PostgresAuthStore(settings.database_url)
     return _build_app(
-        secret=auth_secret_key,
         session_dir=session_dir,
         factory=factory,
         idempotency_store=idempotency_store,
         session_service=session_service,
+        auth_store=auth_store,
     )

@@ -1,10 +1,13 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { Heart, List, MagnifyingGlass, X } from '@phosphor-icons/react'
+import { Heart, List, MagnifyingGlass, UserCircle, X } from '@phosphor-icons/react'
 import { streamChat } from '../api/chat'
+import { ApiError } from '../api/client'
+import { loadAuthState, logout as logoutRequest, type AuthState } from '../api/auth'
 import { loadFavoriteDetail, listFavorites, removeFavoriteById } from '../api/favorites'
 import type { FavoriteProduct } from '../api/favorites'
 import { loadProductDetail } from '../api/products'
-import { createSession, deleteSession, initializeIdentity, listSessions, loadMessages } from '../api/sessions'
+import { createSession, deleteSession, listSessions, loadMessages } from '../api/sessions'
+import { AuthModal } from '../components/AuthModal'
 import { ChatComposer } from '../components/ChatComposer'
 import { ChatMessage } from '../components/ChatMessage'
 import { FavoritesDrawer } from '../components/FavoritesDrawer'
@@ -19,6 +22,11 @@ const palettes = [{ key: 'a', name: '钛金' }, { key: 'b', name: '群青' }, { 
 
 export function ChatPage() {
   const [state, dispatch] = useReducer(chatReducer, initialChatState)
+  const [authUser, setAuthUser] = useState<AuthState['user']>(null)
+  const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<'favorites' | 'new-session' | null>(null)
   const [detailProduct, setDetailProduct] = useState<RecommendedProduct | null>(null)
   const [detail, setDetail] = useState<ProductDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -66,6 +74,64 @@ export function ChatPage() {
         dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '加载会话失败' })
       }
     }
+    return sessionId
+  }
+
+  async function initializeWorkspace(createIfMissing = true) {
+    const sessions = await refreshSessions()
+    const preferred = localStorage.getItem(sessionStorageKey)
+    const selected = sessions.find((item) => item.session_id === preferred) || sessions[0]
+    if (selected) return selectSession(selected.session_id)
+    if (!createIfMissing) {
+      dispatch({ type: 'SESSION_CLEARED' })
+      return null
+    }
+    const created = await createSession()
+    await refreshSessions()
+    return selectSession(created.session_id)
+  }
+
+  async function finishAuthentication(auth: AuthState) {
+    setAuthUser(auth.user)
+    setAuthModalOpen(false)
+    try {
+      const sessionId = await initializeWorkspace(pendingAction !== 'new-session')
+      void refreshFavorites()
+      if (pendingAction === 'new-session') {
+        const created = await createSession()
+        await refreshSessions()
+        await selectSession(created.session_id)
+        setPendingAction(null)
+        return
+      }
+      if (pendingAction === 'favorites') {
+        setFavoritesOpen(true)
+        setPendingAction(null)
+      }
+      if (pendingMessage && sessionId) {
+        const message = pendingMessage
+        setPendingMessage(null)
+        await handleSend(message, [], sessionId, true)
+      }
+    } catch (error) {
+      dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '登录后初始化会话失败' })
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await logoutRequest()
+      setAuthUser(null)
+      setAccountMenuOpen(false)
+      setFavoriteItems([])
+      setFavoritesOpen(false)
+      setPendingMessage(null)
+      localStorage.removeItem(sessionStorageKey)
+      selectedSessionRef.current = null
+      dispatch({ type: 'SESSION_CLEARED' })
+    } catch (error) {
+      dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '退出登录失败' })
+    }
   }
 
   useEffect(() => {
@@ -78,18 +144,12 @@ export function ChatPage() {
     bootedRef.current = true
     async function boot() {
       try {
-        await initializeIdentity()
+        const auth = await loadAuthState()
+        setAuthUser(auth.user)
         dispatch({ type: 'INITIALIZED' })
-        void refreshFavorites()
-        const sessions = await refreshSessions()
-        const preferred = localStorage.getItem(sessionStorageKey)
-        const selected = sessions.find((item) => item.session_id === preferred) || sessions[0]
-        if (selected) {
-          await selectSession(selected.session_id)
-        } else {
-          const created = await createSession()
-          await refreshSessions()
-          await selectSession(created.session_id)
+        if (auth.authenticated) {
+          await initializeWorkspace()
+          void refreshFavorites()
         }
       } catch (error) {
         dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '页面初始化失败' })
@@ -99,6 +159,15 @@ export function ChatPage() {
   }, [])
 
   useEffect(() => () => controllerRef.current?.abort(), [])
+
+  useEffect(() => {
+    function requireLogin() {
+      setAuthUser(null)
+      setAuthModalOpen(true)
+    }
+    window.addEventListener('pickwise:login-required', requireLogin)
+    return () => window.removeEventListener('pickwise:login-required', requireLogin)
+  }, [composerValue])
 
   useEffect(() => {
     const feed = feedRef.current
@@ -118,6 +187,7 @@ export function ChatPage() {
 
   async function handleCreateSession() {
     if (state.streaming || controllerRef.current) return
+    if (!authUser) { setPendingAction('new-session'); setAuthModalOpen(true); return }
     try {
       const created = await createSession()
       await refreshSessions()
@@ -146,8 +216,13 @@ export function ChatPage() {
     }
   }
 
-  async function handleSend(message: string, productRefs: string[] = []) {
-    const sessionId = state.currentSessionId
+  async function handleSend(message: string, productRefs: string[] = [], sessionOverride?: string | null, authenticatedOverride = false) {
+    if (!authUser && !authenticatedOverride) {
+      setPendingMessage(message)
+      setAuthModalOpen(true)
+      return
+    }
+    const sessionId = sessionOverride || state.currentSessionId
     if (!sessionId || state.loading || controllerRef.current) return
     const controller = new AbortController()
     controllerRef.current = controller
@@ -159,6 +234,8 @@ export function ChatPage() {
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         dispatch({ type: 'STREAM_STOPPED', message: '已停止接收；后台仍会继续处理并保存' })
+      } else if (error instanceof ApiError && error.status === 401) {
+        setPendingMessage(message)
       } else {
         dispatch({ type: 'ERROR', message: error instanceof Error ? error.message : '聊天请求失败' })
       }
@@ -236,7 +313,7 @@ export function ChatPage() {
 
   return (
     <main className={`app ${sidebarOpen ? 'sidebar-open' : ''} ${catalogOpen ? 'catalog-open' : ''}`} aria-label="PickWise 工作区">
-      <SessionList sessions={state.sessions} currentSessionId={state.currentSessionId}
+        <SessionList sessions={state.sessions} currentSessionId={state.currentSessionId}
         disabled={!state.initialized || state.streaming}
         onCreate={() => void handleCreateSession()}
         onSelect={(id) => { setSidebarOpen(false); void selectSession(id) }}
@@ -247,13 +324,19 @@ export function ChatPage() {
           <button className="icon-button mobile-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="打开会话列表" aria-expanded={sidebarOpen} title="会话列表"><List size={20} /></button>
           <div className="top-title"><h1>{currentSession?.title || '选购助手'}</h1><p>把复杂需求，整理成可执行的选择。</p></div>
           <div className="topbar-actions">
+            {authUser ? <div className="account-control">
+              <button className="account-button" type="button" onClick={() => setAccountMenuOpen((open) => !open)} aria-label="打开账号菜单" aria-expanded={accountMenuOpen} title={authUser.display_name}>
+                <UserCircle size={20} /><span>{authUser.display_name}</span>
+              </button>
+              {accountMenuOpen && <div className="account-menu"><strong>{authUser.email}</strong><button type="button" onClick={() => void handleLogout()}>退出登录</button></div>}
+            </div> : <button className="account-button" type="button" onClick={() => setAuthModalOpen(true)}><UserCircle size={20} /><span>登录</span></button>}
             <div className="palette-switch" role="group" aria-label="配色方案">
               {palettes.map((item) => <button type="button" key={item.key} className={palette === item.key ? 'is-active' : ''} data-palette={item.key}
                 onClick={() => setPalette(item.key)} aria-pressed={palette === item.key} title={item.name} aria-label={item.name} />)}
             </div>
             <span className={`live ${!state.initialized || state.error ? 'is-unavailable' : ''}`} role="status">{state.streaming ? '正在分析' : state.error ? '需要处理' : state.initialized ? '会话就绪' : '正在连接'}</span>
             <button className="icon-button catalog-toggle" type="button" onClick={() => setCatalogOpen(true)} aria-label="打开本轮推荐" aria-expanded={catalogOpen} title="本轮推荐"><MagnifyingGlass size={20} /></button>
-            <button className="icon-button favorite-toggle" type="button" onClick={() => setFavoritesOpen(true)} aria-label={`我的收藏，${favoriteItems.length}款商品`} aria-expanded={favoritesOpen} title="我的收藏"><Heart size={20} weight={favoriteItems.length ? 'fill' : 'regular'} /><span>{favoriteItems.length}</span></button>
+            <button className="icon-button favorite-toggle" type="button" onClick={() => { if (!authUser) { setPendingAction('favorites'); setAuthModalOpen(true) } else setFavoritesOpen(true) }} aria-label={`我的收藏，${favoriteItems.length}款商品`} aria-expanded={favoritesOpen} title="我的收藏"><Heart size={20} weight={favoriteItems.length ? 'fill' : 'regular'} /><span>{favoriteItems.length}</span></button>
           </div>
         </header>
 
@@ -269,13 +352,14 @@ export function ChatPage() {
         </div>
         {state.error && <div className="inline-error" role="alert"><span>{state.error}</span><button className="icon-button" type="button" title="关闭提示" aria-label="关闭提示" onClick={() => dispatch({ type: 'CLEAR_ERROR' })}><X size={17} /></button></div>}
         {state.streaming && streamingMessage && <p className="stream-status" role="status">{streamingMessage}</p>}
-        <ChatComposer disabled={state.loading || !state.currentSessionId} streaming={state.streaming} value={composerValue} onChange={setComposerValue} onSubmit={(message) => void handleSend(message)} onStop={() => controllerRef.current?.abort()} />
+        <ChatComposer disabled={state.loading || !state.initialized} streaming={state.streaming} value={composerValue} onChange={setComposerValue} onSubmit={(message) => void handleSend(message)} onStop={() => controllerRef.current?.abort()} />
       </section>
 
       <RecommendationPanel products={state.recommendations} selectedRefs={state.selectedRefs} onToggle={toggleCompare} onDetail={openDetails} onCompare={compareSelected} />
       <FavoritesDrawer open={favoritesOpen} items={favoriteItems} onClose={() => setFavoritesOpen(false)} onRemove={(product) => void removeFavorite(product)} onDetail={(product) => void openFavoriteDetails(product)} />
       {(sidebarOpen || catalogOpen) && <button className="panel-backdrop" type="button" aria-label="关闭侧栏" tabIndex={-1} onClick={() => { setSidebarOpen(false); setCatalogOpen(false) }} />}
       <ProductDetailDrawer product={detailProduct} detail={detail} loading={detailLoading} onClose={() => setDetailProduct(null)} onCompare={detailKind === 'recommendation' ? () => { if (detailProduct) toggleCompare(detailProduct.ref); setDetailProduct(null) } : undefined} />
+      <AuthModal open={authModalOpen} onClose={() => { setAuthModalOpen(false); if (pendingMessage) setComposerValue(pendingMessage); setPendingMessage(null); setPendingAction(null) }} onAuthenticated={(auth) => void finishAuthentication(auth)} />
     </main>
   )
 }

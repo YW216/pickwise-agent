@@ -63,7 +63,7 @@ flowchart TB
 
     subgraph API["⚡ FastAPI · 全异步"]
         direction LR
-        AUTH["匿名身份<br/>签名 Cookie + CSRF"]
+        AUTH["账号登录<br/>服务端 Session Cookie + CSRF"]
         IDEM["幂等保护<br/>Idempotency-Key"]
         SSE["SSE 事件流"]
     end
@@ -358,7 +358,7 @@ python app/scripts/build_product_kb.py --mode rebuild                 # 全量�
 
 | 层面 | 实现 |
 |---|---|
-| 🪪 **匿名身份** | 服务端用 `itsdangerous` 签名的 Cookie（用户 UUID + CSRF 随机值），不手写加解密；Cookie 被篡改或过期返回 401，**不会静默签发新身份** |
+| 🪪 **账号登录** | 邮箱 + 密码注册登录；浏览器只持有随机 HttpOnly Session Cookie，PostgreSQL 保存 token 哈希、用户归属、CSRF 值与过期时间；退出时服务端撤销 Session |
 | 🛑 **CSRF** | 写请求必须携带与凭证内一致的 `X-Pickwise-CSRF`（`compare_digest` 安全比对），并校验 `Origin` 白名单 |
 | 🗂️ **会话键** | `(user_id, session_id)` 是会话的唯一键；落库表主键同为该组合，跨用户无法读取 |
 | 🏷️ **商品 `ref`** | 前端只拿到随机 `ref` 和展示编号（#01 / #02），**看不到内部 `product_id`**；ref 绑定 `user_id + session_id`，别的用户 / 会话拿到也无法使用，1 小时 TTL |
@@ -422,6 +422,7 @@ Milvus      =  检索索引   只负责召回，价格 / 详情一律回查 PG
 | 表 | 内容 |
 |---|---|
 | `products` | 商品目录、规格、介绍、价格，附带 `card_hash` / `indexed_at` 索引状态 |
+| `users` · `auth_sessions` | 账号密码哈希与服务端登录 Session；浏览器只持有随机 Cookie，数据库只存其哈希 |
 | `favorites` · `user_favorites` | 用户收藏 |
 | `sessions` | 会话快照（`messages` / `summary` / `short_term_memory` / `products` / `recommendations` 为 JSONB），带 `version` 与 `status` |
 | `chat_idempotency_records` | 幂等账本（主键 `user_id + session_id + idempotency_key`，带过期时间） |
@@ -471,7 +472,7 @@ python app/scripts/run_rag_eval.py --top-k 5   # RAG 检索评测
 | Result Agent | 不调用工具 | 角色单一、上下文可控、避免循环 | 汇总时信息不足只能如实说明 |
 | 黑板 | 只写不互读 | 并行简单、无死锁、延迟低 | 跨 Agent 的冲突只能靠 Result Agent 调解 |
 | 工具结果截断 | 超限保留头尾预览 | 防御性设计：防模型传参异常导致结果过大 | 检索工具本身已限制返回数，实际很少触发；也可再加固定的 max count |
-| 身份认证 | 匿名签名 Cookie | 目的是跑通并验证多租户隔离 | 生产环境可换成账号体系（如 JWT） |
+| 身份认证 | 服务端 Session + HttpOnly Cookie | 适合当前同站 React + FastAPI Web 应用，支持服务端即时撤销 | 尚未实现邮箱验证、找回密码和登录限流 |
 | MCP | 仅保留客户端与转换器，未接入 | 当前工具均为本地实现 | `ToolManager` 启用 MCP 时降级为本地工具；不要把 MCP 当作已完成能力 |
 
 ## 🚀 快速开始
@@ -517,9 +518,9 @@ OPENAI_API_KEY=sk-你的模型服务密钥
 EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
 EMBEDDING_API_KEY=sk-你的Embedding服务密钥
 
-# Web 服务必填：匿名 Cookie 签名密钥，至少 32 字节
-# 生成：python -c "import secrets; print(secrets.token_urlsafe(48))"
-AUTH_SECRET_KEY=替换为随机字符串
+# Web 登录 Session Cookie 配置
+AUTH_SESSION_MAX_AGE_DAYS=30
+AUTH_COOKIE_SECURE=false
 ```
 
 > `DATABASE_URL`、`MILVUS_URI` 等其余配置均有默认值，完整列表见 `.env.example` 与 `app/config/settings.py`。
@@ -610,7 +611,7 @@ pickwise-agent/
 
 | 分类 | 接口 |
 |---|---|
-| 身份 | `POST /api/auth/anonymous` |
+| 身份 | `POST /api/auth/register` · `POST /api/auth/login` · `GET /api/auth/me` · `POST /api/auth/logout` |
 | 会话 | `POST /api/sessions` · `GET /api/sessions` · `GET /api/sessions/{id}` · `GET /api/sessions/{id}/messages` · `DELETE /api/sessions/{id}` |
 | 聊天 | `POST /api/chat` · `POST /api/chat/stream`（SSE，前端主要使用） |
 | 商品 | `GET /api/products/search` · `GET /api/products/{product_id}` · `GET /api/products/ref/{product_ref}` · `POST /api/products/compare` |
@@ -627,14 +628,14 @@ pickwise-agent/
 - **长期记忆目前落在本地 JSON 文件**，多实例部署时无法共享
 - **MCP 尚未真正接入**：运行路径是 `Agent → 本地 ToolManager → 本地工具`
 - **商品图目前以品类图为主**：`product_images.py` 已支持按商品 ID 匹配专属图
-- **身份认证只是匿名模式**，用于验证多租户隔离
+- **身份认证使用账号 + 服务端 Session Cookie**；新部署需先执行 `python app/scripts/init_pg.py` 创建用户和认证 Session 表
 
 **Roadmap**
 
 - [ ] 多进程会话路由 / Redis 分布式锁
 - [ ] 同会话请求排队（队列 + 锁）
 - [ ] LLM 调用层改造，支持真正的 token 级流式
-- [ ] 账号体系（JWT）替换匿名身份
+- [ ] 邮箱验证、密码找回与认证接口限流
 - [ ] 长期记忆持久化到数据库
 - [ ] 补齐 `requirements.txt`（`langfuse`、`pytest`）
 - [ ] MCP 服务端的重新接入

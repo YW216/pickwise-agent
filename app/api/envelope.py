@@ -70,5 +70,10 @@ def session_error(exc: SessionManagerError, request_id: str) -> JSONResponse:
 
 
 def clear_auth_cookie() -> dict[str, str]:
-    """失效凭证的清除头：用相同 Path 让浏览器删除 Cookie。"""
-    return {"Set-Cookie": f"{COOKIE_NAME}=; Path=/api; Max-Age=0; HttpOnly"}
+    """Clear the opaque login cookie using matching cookie scope."""
+    return {
+        "Set-Cookie": (
+            f"{COOKIE_NAME}=; Path=/api; Max-Age=0; HttpOnly; "
+            "SameSite=Lax"
+        )
+    }

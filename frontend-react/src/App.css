@@ -70,6 +70,27 @@ body { background: var(--bg); color: var(--ink); font: 15px/1.7 var(--sans); }
 .icon-button:hover { color: var(--jade); background: var(--soft); }
 .favorite-toggle { position: relative; width: 36px; height: 36px; border: 1px solid var(--ln); border-radius: 10px; }
 .favorite-toggle span { position: absolute; top: -5px; right: -6px; display: grid; min-width: 17px; height: 17px; padding: 0 4px; place-items: center; border: 2px solid var(--sf); border-radius: 99px; color: #162019; background: var(--gold); font: 700 10px/1 var(--num); }
+.account-control { position: relative; }
+.account-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 10px; border: 1px solid var(--ln); border-radius: 8px; color: var(--ink); background: var(--sf); font-size: 13px; }
+.account-button:hover { border-color: var(--jade); }
+.account-button span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-menu { position: absolute; z-index: 30; top: calc(100% + 8px); right: 0; display: grid; gap: 8px; width: 220px; padding: 12px; border: 1px solid var(--ln); border-radius: 8px; background: var(--sf); box-shadow: 0 12px 32px rgba(0,0,0,.14); }
+.account-menu strong { overflow: hidden; color: var(--mu); font-size: 12px; font-weight: 500; text-overflow: ellipsis; }
+.account-menu button { padding: 8px; border: 0; border-radius: 6px; color: var(--ink); background: var(--soft); text-align: left; }
+.auth-overlay { position: fixed; z-index: 50; inset: 0; display: grid; padding: 20px; place-items: center; background: rgba(10, 15, 30, .48); }
+.auth-dialog { width: min(420px, 100%); padding: 24px; border: 1px solid var(--ln); border-radius: 10px; color: var(--ink); background: var(--sf); box-shadow: 0 24px 70px rgba(0,0,0,.24); }
+.auth-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.auth-dialog-header span { color: var(--mu); font-size: 12px; }
+.auth-dialog-header h2 { margin-top: 3px; font-size: 21px; line-height: 1.4; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin: 20px 0; border-radius: 7px; background: var(--soft); }
+.auth-tabs button { min-height: 36px; border: 0; border-radius: 5px; color: var(--mu); background: transparent; }
+.auth-tabs button.is-active { color: var(--ink); background: var(--sf); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.auth-form { display: grid; gap: 14px; }
+.auth-form label { display: grid; gap: 6px; color: var(--mu); font-size: 13px; }
+.auth-form input { width: 100%; min-height: 42px; padding: 8px 11px; border: 1px solid var(--ln); border-radius: 7px; color: var(--ink); background: var(--sf); }
+.auth-error { color: var(--error); font-size: 13px; }
+.auth-submit { min-height: 43px; margin-top: 2px; border: 0; border-radius: 7px; color: var(--onj); background: var(--jade); font-weight: 700; }
+.auth-submit:disabled { opacity: .65; }
 .mobile-menu-button, .catalog-toggle, .catalog-close, .panel-close, .panel-backdrop { display: none; }
 
 /* The sidebar, message feed and catalog scroll independently. */

@@ -27,7 +27,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from app.api import routes
-from app.api.auth import AnonymousAuth
+from app.api.auth import AuthService
 from app.api.envelope import (
     MAX_BODY_BYTES,
     error,
@@ -40,6 +40,7 @@ from app.services.idempotency import PostgresIdempotencyStore
 from app.services.session_manager import SessionManager
 from app.services.session_service import SessionService
 from app.db.session_repo import PostgresSessionStore
+from app.db.auth_repo import PostgresAuthStore
 
 
 class DependencyProbe:
@@ -153,29 +154,30 @@ def create_app() -> FastAPI:
     真实 MultiAgentOrchestrator 与 PostgreSQL 幂等存储。
     """
     settings.assert_auth_configured()
-    secret = settings.auth_secret_key
-    if len(secret.encode()) < 32:
-        raise RuntimeError("AUTH_SECRET_KEY 过弱：至少 32 字节高强度随机材料")
-
     return _build_app(
-        secret=secret,
         session_dir=Path(settings.web_session_dir),
         factory=None,
         idempotency_store=PostgresIdempotencyStore(settings.database_url),
         session_service=SessionService(
             PostgresSessionStore(settings.database_url)
         ),
+        auth_store=PostgresAuthStore(settings.database_url),
     )
 
 
-def _build_app(*, secret: str, session_dir: str | Path,
+def _build_app(*, session_dir: str | Path,
                factory=None, idempotency_store=None,
-               session_service: SessionService | None = None) -> FastAPI:
+               session_service: SessionService | None = None,
+               auth_store=None) -> FastAPI:
     """组装应用的公共实现；测试通过 ``app.api.testing`` 调用。"""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # 启动顺序：配置校验（上方）→ 异步基础层 → SessionManager/执行器 → 清理任务（§4.6）
-        app.state.auth = AnonymousAuth(secret, settings.auth_cookie_max_age_days * 86400)
+        if auth_store is None:
+            raise RuntimeError("AuthStore is required")
+        app.state.auth_service = AuthService(
+            auth_store, settings.auth_session_max_age_days * 86400,
+        )
         app.state.async_runtime = AsyncRuntime()
         await app.state.async_runtime.open()  # 异步模型客户端 + PG 连接池
 

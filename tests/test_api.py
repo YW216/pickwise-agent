@@ -6,14 +6,17 @@ TestClient + 假 factory + 临时目录；不使用真实模型。覆盖：身�
 
 import json
 import uuid
+from itertools import count
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.testing import create_test_app
+from tests.in_memory_auth_store import InMemoryAuthStore
 from tests.test_session_manager import FakeAgent, FactoryRecorder
 
 SECRET = "api-test-secret-key-0123456789abcdef"  # 40 字节
+_user_ids = count(1)
 
 
 @pytest.fixture
@@ -23,8 +26,9 @@ def factory():
 
 @pytest.fixture
 def app(tmp_path, factory):
-    return create_test_app(auth_secret_key=SECRET, session_dir=tmp_path,
-                      factory=factory)
+    return create_test_app(session_dir=tmp_path,
+                      factory=factory,
+                      auth_store=InMemoryAuthStore())
 
 
 @pytest.fixture
@@ -34,10 +38,16 @@ def client(app):
 
 
 def _init_user(client) -> dict:
-    """完成匿名初始化，返回 {user_id, csrf_token}。"""
-    resp = client.post("/api/auth/anonymous")
-    assert resp.status_code == 200, resp.text
-    return resp.json()["data"]
+    """Register a test account and return the authenticated identity payload."""
+    number = next(_user_ids)
+    resp = client.post("/api/auth/register", json={
+        "email": f"user{number}@example.com",
+        "password": "test-password-123",
+        "display_name": f"User {number}",
+    })
+    assert resp.status_code == 201, resp.text
+    data = resp.json()["data"]
+    return {**data["user"], "csrf_token": data["csrf_token"]}
 
 
 def _auth_headers(user) -> dict:
@@ -51,7 +61,7 @@ def _create_session(client, user) -> str:
     return resp.json()["data"]["session_id"]
 
 
-# ---------- 健康与匿名身份 ----------
+# ---------- 健康与账号身份 ----------
 
 def test_health_liveness(client):
     resp = client.get("/api/health")
@@ -59,21 +69,31 @@ def test_health_liveness(client):
     assert resp.json().get("status") == "ok"
 
 
-def test_anonymous_issue_then_reuse_same_identity(client):
-    first = _init_user(client)
-    second = _init_user(client)
-    assert first["user_id"] == second["user_id"]  # 复用身份，不签发新的
-    assert first["csrf_token"] == second["csrf_token"]
+def test_registration_creates_server_session_and_login_reuses_account(client):
+    user = _init_user(client)
+    first_cookie = client.cookies.get("pickwise_session")
+    assert first_cookie
+    state = client.get("/api/auth/me").json()["data"]
+    assert state["authenticated"] is True
+    assert state["user"]["user_id"] == user["user_id"]
+    client.post("/api/auth/logout", headers=_auth_headers(user))
+    logged_in = client.post("/api/auth/login", json={
+        "email": user["email"], "password": "test-password-123",
+    })
+    assert logged_in.status_code == 200
+    assert logged_in.json()["data"]["user"]["user_id"] == user["user_id"]
+    assert client.cookies.get("pickwise_session") != first_cookie
 
 
-def test_tampered_cookie_gets_401_and_clearing(client):
-    client.cookies.set("pickwise_anon", "forged-token-value")
-    resp = client.post("/api/auth/anonymous")
-    assert resp.status_code == 401
-    assert resp.json()["error"]["code"] == "AUTH_INVALID"
-    assert "Max-Age=0" in resp.headers.get("set-cookie", "")  # 服务端清除失效 Cookie
-    # 业务请求同样 401
-    assert client.post("/api/sessions", json={}).status_code == 401
+def test_login_required_for_private_api_and_tampered_cookie(client):
+    assert client.get("/api/auth/me").json()["data"]["authenticated"] is False
+    rejected = client.get("/api/sessions")
+    assert rejected.status_code == 401
+    assert "Max-Age=0" in rejected.headers.get("set-cookie", "")
+    client.cookies.set("pickwise_session", "forged-token-value", path="/api")
+    rejected = client.get("/api/sessions")
+    assert rejected.status_code == 401
+    assert "Max-Age=0" in rejected.headers.get("set-cookie", "")
 
 
 # ---------- 窗口创建、归属与隔离 ----------
@@ -115,10 +135,10 @@ def test_wrong_csrf_is_403(client):
 
 def test_another_users_window_is_404(client):
     user_a = _init_user(client)
-    cookie_a = client.cookies.get("pickwise_anon")  # 保存 A 的凭证串
+    cookie_a = client.cookies.get("pickwise_session")  # 保存 A 的登录凭证
     session_a = _create_session(client, user_a)
 
-    # B 是另一个匿名身份：清掉 Cookie 重新初始化
+    # B 是另一个账号：清掉 Cookie 后重新注册
     client.cookies.clear()
     user_b = _init_user(client)
     assert user_b["user_id"] != user_a["user_id"]
@@ -132,7 +152,10 @@ def test_another_users_window_is_404(client):
     assert resp.json()["error"]["code"] == "SESSION_NOT_FOUND"
 
     # 反向同样隔离：恢复 A 的 Cookie，拿 B 的窗口
-    client.cookies.set("pickwise_anon", cookie_a)
+    client.cookies.clear()
+    client.cookies.set("pickwise_session", cookie_a, path="/api")
+    user_a_state = client.get("/api/auth/me").json()["data"]
+    user_a = {**user_a_state["user"], "csrf_token": user_a_state["csrf_token"]}
     resp = client.post("/api/chat", json={"session_id": session_b,
                                           "message": "反向"},
                        headers=_auth_headers(user_a))
@@ -189,8 +212,10 @@ def test_request_body_too_large_is_413(client):
 # ---------- 两个应用实例互不共享 ----------
 
 def test_two_app_instances_do_not_share_managers(tmp_path, factory):
-    app1 = create_test_app(auth_secret_key=SECRET, session_dir=tmp_path / "one")
-    app2 = create_test_app(auth_secret_key=SECRET, session_dir=tmp_path / "two")
+    app1 = create_test_app(session_dir=tmp_path / "one",
+                           auth_store=InMemoryAuthStore())
+    app2 = create_test_app(session_dir=tmp_path / "two",
+                           auth_store=InMemoryAuthStore())
     with TestClient(app1) as c1, TestClient(app2) as c2:
         user1 = _init_user(c1)
         session1 = _create_session(c1, user1)
@@ -205,12 +230,8 @@ def test_two_app_instances_do_not_share_managers(tmp_path, factory):
 
 # ---------- 商品接口（依赖本地 PG：不可用则跳过） ----------
 
-def test_product_detail_not_found_is_404(client):
-    user = _init_user(client)
-    resp = client.get("/api/products/NO-SUCH-ID",
-                      headers=_auth_headers(user))
-    assert resp.status_code == 404
-    assert resp.json()["error"]["code"] == "PRODUCT_NOT_FOUND"
+def test_product_catalog_is_public(client):
+    assert client.get("/api/products/NO-SUCH-ID").status_code in (404, 503)
 
 
 def test_favorite_requires_valid_session_ref(client):

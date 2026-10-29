@@ -1,4 +1,4 @@
-import { csrfHeaders } from './client'
+import { ApiError, csrfHeaders, notifyLoginRequired } from './client'
 import type { ChatStreamEvent } from '../types/chat'
 
 export interface ChatRequest {
@@ -13,10 +13,18 @@ export type StreamEventHandler = (event: ChatStreamEvent) => void
 function streamError(payload: unknown, status: number): Error {
   if (payload && typeof payload === 'object' && 'error' in payload) {
     const error = (payload as { error?: { message?: string } | string }).error
-    if (typeof error === 'string') return new Error(error)
-    if (error?.message) return new Error(error.message)
+    if (typeof error === 'string') return new ApiError(error, status)
+    if (error?.message) return new ApiError(error.message, status)
   }
-  return new Error(`请求失败（${status}）`)
+  if (payload && typeof payload === 'object' && 'detail' in payload) {
+    const detail = (payload as { detail?: unknown }).detail
+    if (detail && typeof detail === 'object' && 'message' in detail) {
+      const item = detail as { message?: unknown; code?: unknown }
+      return new ApiError(String(item.message || '请求失败'), status, typeof item.code === 'string' ? item.code : undefined)
+    }
+    if (typeof detail === 'string') return new ApiError(detail, status)
+  }
+  return new ApiError(`请求失败（${status}）`, status)
 }
 
 function dispatchFrame(eventName: string, dataLines: string[], onEvent: StreamEventHandler) {
@@ -46,6 +54,7 @@ export async function streamChat(
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}))
+    if (response.status === 401) notifyLoginRequired()
     throw streamError(payload, response.status)
   }
   if (!response.body) throw new Error('服务未返回事件流')
