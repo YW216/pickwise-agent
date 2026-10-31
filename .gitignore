@@ -61,7 +61,8 @@ wtest.py
 _tmp_measure_saving.py
 demo/
 .pytest_*/
-tests/  
+tests/*
+!tests/test_production_tracing.py
 
 项目学习文档/
 

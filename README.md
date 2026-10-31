@@ -504,7 +504,6 @@ python -m venv .venv
 source .venv/bin/activate        # Windows PowerShell: .venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-pip install langfuse             # 编排器会 import，当前 requirements.txt 未声明（追踪功能本身可不配置）
 
 cp .env.example .env
 ```
@@ -637,7 +636,7 @@ pickwise-agent/
 - [ ] LLM 调用层改造，支持真正的 token 级流式
 - [ ] 邮箱验证、密码找回与认证接口限流
 - [ ] 长期记忆持久化到数据库
-- [ ] 补齐 `requirements.txt`（`langfuse`、`pytest`）
+- [ ] 补齐测试环境依赖（`pytest`）
 - [ ] MCP 服务端的重新接入
 
 ## 📚 源码阅读路线

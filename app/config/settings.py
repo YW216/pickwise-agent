@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
@@ -46,6 +47,9 @@ class Settings(BaseSettings):
     langfuse_base_url: str = ""
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
+    # Only explicit production scopes; offline evaluation has its own reporter.
+    production_tracing_enabled: bool = True
+    production_tracing_environment: Literal["development", "staging", "production"] = "development"
 
     # RAG 配置（第5期）
     # Embedding 服务可独立配置（如硅基流动 SiliconFlow）。

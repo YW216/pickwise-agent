@@ -30,4 +30,5 @@ def create_test_app(*, session_dir: str | Path,
         idempotency_store=idempotency_store,
         session_service=session_service,
         auth_store=auth_store,
+        production_tracing=False,
     )

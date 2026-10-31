@@ -41,6 +41,7 @@ from app.services.session_manager import SessionManager
 from app.services.session_service import SessionService
 from app.db.session_repo import PostgresSessionStore
 from app.db.auth_repo import PostgresAuthStore
+from app.observability.tracing import ProductionTracing
 
 
 class DependencyProbe:
@@ -168,13 +169,20 @@ def create_app() -> FastAPI:
 def _build_app(*, session_dir: str | Path,
                factory=None, idempotency_store=None,
                session_service: SessionService | None = None,
-               auth_store=None) -> FastAPI:
+               auth_store=None, production_tracing: bool = True) -> FastAPI:
     """组装应用的公共实现；测试通过 ``app.api.testing`` 调用。"""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # 启动顺序：配置校验（上方）→ 异步基础层 → SessionManager/执行器 → 清理任务（§4.6）
         if auth_store is None:
             raise RuntimeError("AuthStore is required")
+        app.state.tracing = ProductionTracing(
+            enabled=production_tracing and settings.production_tracing_enabled,
+            public_key=settings.langfuse_public_key,
+            secret_key=settings.langfuse_secret_key,
+            base_url=settings.langfuse_base_url,
+            environment=settings.production_tracing_environment,
+        )
         app.state.auth_service = AuthService(
             auth_store, settings.auth_session_max_age_days * 86400,
         )
@@ -214,6 +222,7 @@ def _build_app(*, session_dir: str | Path,
             await close_all_pools()
             from app.agent.tools.search_products import close_public_clients
             close_public_clients()
+            await app.state.tracing.aclose()
 
     app = FastAPI(title="PickWise", version="0.1.0", lifespan=lifespan)
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_BODY_BYTES)
