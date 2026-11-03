@@ -13,7 +13,7 @@ Web 服务启动后、处理模型请求前，应完成实例初始化。
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 
 
@@ -71,7 +71,61 @@ OTEL_KEEP_ATTRIBUTES = {
 
 
 # ============================================================
-# 2. 元数据处理和数据脱敏
+# 2. 上下文工具
+# ============================================================
+
+@contextmanager
+def set_production_scope(enabled):
+    """临时切换运行时脱敏范围，退出时恢复原来的协程上下文。"""
+    token = production_scope.set(enabled)
+    try:
+        yield
+    finally:
+        production_scope.reset(token)
+
+
+@contextmanager
+def activate_observation(observation, *, user_id=None, session_id=None):
+    """激活已有追踪，统一管理业务脱敏范围和 SDK 上下文。"""
+    with set_production_scope(True):
+        if observation.sdk is None:
+            yield observation
+            return
+
+        contexts = ExitStack()
+        try:
+            from langfuse import propagate_attributes
+            from opentelemetry.trace import use_span
+
+            # SDK 4.15.3 没有 observe()；直接激活底层真实 Span。
+            # 禁止自动写入异常正文，也不在退出时结束跨任务复用的根节点。
+            contexts.enter_context(use_span(
+                observation.sdk._otel_span,
+                end_on_exit=False,
+                record_exception=False,
+                set_status_on_exception=False,
+            ))
+            contexts.enter_context(propagate_attributes(
+                user_id=user_id,
+                session_id=session_id,
+                metadata={SOURCE: "production"},
+            ))
+        except Exception:
+            # SDK 上下文不可用时，业务仍在脱敏范围内执行一次。
+            pass
+
+        try:
+            yield observation
+        finally:
+            # 只清理 SDK 上下文，不把业务异常传给 SDK 自动记录。
+            try:
+                contexts.close()
+            except Exception:
+                pass
+
+
+# ============================================================
+# 3. 元数据处理和数据脱敏
 # ============================================================
 
 def get_metadata(data):
@@ -99,7 +153,7 @@ def mask_content(*, data, **kwargs):
 
 
 def is_production_span(attributes):
-    """判断当前 OpenTelemetry Span 是否属于生产环境。"""
+    """只读取 Span 属性；后台导出线程不能依赖协程 ContextVar。"""
     for kind in ("trace", "observation"):
         key = f"langfuse.{kind}.metadata.{SOURCE}"
 
@@ -169,123 +223,55 @@ def mask_otel_spans(params):
 
 
 # ============================================================
-# 3. Observation：管理单个追踪对象
+# 4. Observation：SDK 薄包装
 # ============================================================
 
 class Observation:
-    """封装 Langfuse Observation 的创建、激活、更新和结束。"""
+    """隔离 SDK 更新和结束操作的异常，提供关闭追踪时的空对象。"""
 
     def __init__(self, sdk=None):
         self.sdk = sdk
-
-        if sdk is None:
-            self.trace_id = None
-            self.span_id = None
-        else:
+        self.trace_id = None
+        self.span_id = None
+        if sdk is not None:
             self.trace_id = sdk.trace_id
             self.span_id = sdk.id
 
     def update(self, **fields):
-        """更新 Observation 的元数据和状态。"""
+        """仅更新白名单元数据，不记录异常正文。"""
         if self.sdk is None:
             return
 
-        # 更新元数据时暂时关闭生产环境内容屏蔽标记
-        token = production_scope.set(False)
-
         try:
+            level = "DEFAULT"
             if fields.get("error_type"):
                 level = "ERROR"
-            else:
-                level = "DEFAULT"
 
-            self.sdk.update(
-                metadata=get_metadata(fields),
-                level=level,
-            )
-
+            # SDK 对 metadata 也调用内容脱敏器；这里只写已过滤的元数据。
+            with set_production_scope(False):
+                self.sdk.update(metadata=get_metadata(fields), level=level)
         except Exception:
-            # 追踪失败不能影响业务执行
             pass
 
-        finally:
-            production_scope.reset(token)
-
-    @contextmanager
     def activate(self, *, user_id=None, session_id=None):
-        """在当前执行上下文中激活 Observation。"""
-        if self.sdk is None:
-            yield self
-            return
-
-        # 标记当前执行过程属于生产环境
-        token = production_scope.set(True)
-
-        try:
-            # 初始化 Langfuse 和 OpenTelemetry 上下文
-            from langfuse import propagate_attributes
-            from opentelemetry.trace import (
-                NonRecordingSpan,
-                SpanContext,
-                TraceFlags,
-                use_span,
-            )
-
-            # 根据当前 Observation 的 ID 构造父 Span
-            parent = NonRecordingSpan(
-                SpanContext(
-                    int(self.trace_id, 16),
-                    int(self.span_id, 16),
-                    is_remote=False,
-                    trace_flags=TraceFlags(TraceFlags.SAMPLED),
-                )
-            )
-
-        except Exception:
-            # 上下文初始化失败时，仍然允许业务代码正常执行
-            try:
-                yield self
-            finally:
-                production_scope.reset(token)
-
-            return
-
-        try:
-            # 激活父 Span，避免自动记录异常文本和堆栈
-            with use_span(
-                parent,
-                record_exception=False,
-                set_status_on_exception=False,
-            ):
-                # 传递用户、会话和生产环境元数据
-                with propagate_attributes(
-                    user_id=user_id,
-                    session_id=session_id,
-                    metadata={SOURCE: "production"},
-                ):
-                    yield self
-
-        finally:
-            # 恢复进入上下文之前的状态
-            production_scope.reset(token)
+        """兼容聊天根节点接口，上下文管理统一交给外部工具。"""
+        return activate_observation(self, user_id=user_id, session_id=session_id)
 
     def end(self):
-        """结束当前 Observation。"""
+        """结束追踪；先释放引用，防止重复结束或继续更新。"""
         if self.sdk is None:
             return
 
         sdk = self.sdk
         self.sdk = None
-
         try:
             sdk.end()
         except Exception:
-            # 结束追踪失败不影响业务
             pass
 
 
 # ============================================================
-# 4. ProductionTracing：管理生产环境追踪
+# 5. ProductionTracing：管理生产环境追踪
 # ============================================================
 
 class ProductionTracing:
@@ -304,10 +290,7 @@ class ProductionTracing:
         self.client = None
 
         # 未开启追踪或缺少密钥时，不初始化客户端
-        if not enabled:
-            return
-
-        if not public_key or not secret_key:
+        if not enabled or not public_key or not secret_key:
             return
 
         try:
@@ -333,30 +316,20 @@ class ProductionTracing:
         return self.client is not None
 
     def start(self, name, **fields):
-        """创建一个生产环境 Observation。"""
+        """创建根节点或子节点；生命周期由调用方或 span() 管理。"""
         if self.client is None:
             return Observation()
-
-        # 创建 Observation 时只传递白名单元数据
-        token = production_scope.set(False)
 
         try:
             metadata = get_metadata(fields)
             metadata[SOURCE] = "production"
 
-            sdk = self.client.start_observation(
-                name=name,
-                metadata=metadata,
-            )
-
+            # 固化生产标记供后台导出读取，避免它被运行时脱敏器屏蔽。
+            with set_production_scope(False):
+                sdk = self.client.start_observation(name=name, metadata=metadata)
             return Observation(sdk)
-
         except Exception:
-            # 创建追踪失败时返回空 Observation
             return Observation()
-
-        finally:
-            production_scope.reset(token)
 
     @contextmanager
     def span(
@@ -373,7 +346,8 @@ class ProductionTracing:
 
         try:
             # 激活 Observation，执行其中的业务代码
-            with observation.activate(
+            with activate_observation(
+                observation,
                 user_id=user_id,
                 session_id=session_id,
             ):

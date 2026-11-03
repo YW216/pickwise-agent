@@ -14,8 +14,9 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 # Windows 上 psycopg 异步模式要求 Selector 事件循环（Proactor 不支持
@@ -26,7 +27,11 @@ from fastapi.staticfiles import StaticFiles
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from app.api import routes
+from app.api.routes.auth import auth_router
+from app.api.routes.sessions import sessions_router
+from app.api.routes.chat import chat_router
+from app.api.routes.products import products_router
+from app.api.routes.favorites import favorites_router
 from app.api.auth import AuthService
 from app.api.envelope import (
     MAX_BODY_BYTES,
@@ -233,12 +238,24 @@ def _build_app(*, session_dir: str | Path,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(routes.auth_router)
-    app.include_router(routes.sessions_router)
-    app.include_router(routes.chat_router)
-    app.include_router(routes.products_router)
-    app.include_router(routes.favorites_router)
-    app.include_router(routes.health_router)
+    app.include_router(auth_router)
+    app.include_router(sessions_router)
+    app.include_router(chat_router)
+    app.include_router(products_router)
+    app.include_router(favorites_router)
+
+    @app.get("/api/health", tags=["health"])
+    async def health():
+        """存活检查：进程和事件循环能响应即 200，不访问外部服务。"""
+        return {"status": "ok"}
+
+    @app.get("/api/ready", tags=["health"])
+    async def ready(request: Request):
+        """接流量判断：核心依赖可用 200，降级/不可用 503（探测带短缓存）。"""
+        status = await request.app.state.dependency_probe.snapshot()
+        return JSONResponse(status_code=200 if status["ready"] else 503,
+                            content=status)
+
     frontend_dir = Path(__file__).resolve().parents[2] / "frontend-react" / "dist"
     media_dir = Path(__file__).resolve().parents[2] / "assets" / "products"
     if media_dir.is_dir():

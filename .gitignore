@@ -63,6 +63,8 @@ demo/
 .pytest_*/
 tests/*
 !tests/test_production_tracing.py
+!tests/test_chat_tracing.py
+!tests/test_public_text.py
 
 项目学习文档/
 

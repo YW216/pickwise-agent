@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request
 from app.api.auth import AuthError, AuthenticatedUser, COOKIE_NAME, CSRF_HEADER
 from app.api.envelope import clear_auth_cookie
 from app.config.settings import settings
+from app.identity import SessionIdentity
 from app.services.session_manager import SessionManager
 from app.services.session_service import SessionService
 
@@ -64,3 +65,15 @@ async def require_csrf(
     if origin and settings.allowed_origins and origin not in settings.allowed_origins:
         raise HTTPException(status_code=403, detail="来源不在允许列表内")
     return user
+
+
+def identity_for(user: AuthenticatedUser, session_id: str) -> SessionIdentity:
+    """凭证 user_id + 请求方窗口编号组身份；UUID 非法 → 422。
+
+    归属隔离由 SessionManager 的文件定位天然保证：窗口文件只会在
+    当前用户目录下查找，别人的窗口对本用户一律不存在（统一 404）。
+    """
+    try:
+        return SessionIdentity(user_id=user.user_id, session_id=session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="窗口编号必须是 UUID") from exc

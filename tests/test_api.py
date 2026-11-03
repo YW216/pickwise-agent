@@ -264,8 +264,8 @@ def test_favorite_detail_uses_user_favorite_product_id(client, monkeypatch):
             "price": 100,
         }}}
 
-    monkeypatch.setattr("app.api.routes.get_favorite_product_id", fake_lookup)
-    monkeypatch.setattr("app.api.routes.get_detail", fake_detail)
+    monkeypatch.setattr("app.api.routes.favorites.get_favorite_product_id", fake_lookup)
+    monkeypatch.setattr("app.api.routes.favorites.get_detail", fake_detail)
     resp = client.get("/api/favorites/item/LP-01/detail",
                       headers=_auth_headers(user))
 
@@ -286,7 +286,7 @@ def test_favorites_response_contains_product_id_for_client_actions(client, monke
             "total": 1,
         }}
 
-    monkeypatch.setattr("app.api.routes.get_user_favorites", fake_get_favorites)
+    monkeypatch.setattr("app.api.routes.favorites.get_user_favorites", fake_get_favorites)
     resp = client.get("/api/favorites", headers=_auth_headers(user))
     assert resp.status_code == 200
     favorite = resp.json()["data"]["favorites"][0]
@@ -302,7 +302,7 @@ def test_remove_favorite_uses_user_scoped_product_id(client, monkeypatch):
         calls.append((user_id, product_id))
         return True
 
-    monkeypatch.setattr("app.api.routes.remove_favorite", fake_remove)
+    monkeypatch.setattr("app.api.routes.favorites.remove_favorite", fake_remove)
     resp = client.delete("/api/favorites/item/LP-01",
                          headers=_auth_headers(user))
     assert resp.status_code == 200
@@ -331,9 +331,9 @@ def test_favorite_actions_cannot_access_another_users_favorite(client, monkeypat
     async def unexpected_detail(*args, **kwargs):
         pytest.fail("Unowned favorite must not reach the product query")
 
-    monkeypatch.setattr("app.api.routes.get_favorite_product_id", fake_lookup)
-    monkeypatch.setattr("app.api.routes.remove_favorite", fake_remove)
-    monkeypatch.setattr("app.api.routes.get_detail", unexpected_detail)
+    monkeypatch.setattr("app.api.routes.favorites.get_favorite_product_id", fake_lookup)
+    monkeypatch.setattr("app.api.routes.favorites.remove_favorite", fake_remove)
+    monkeypatch.setattr("app.api.routes.favorites.get_detail", unexpected_detail)
     if action == "detail":
         resp = client.get("/api/favorites/item/LP-01/detail")
     else:

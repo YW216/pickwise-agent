@@ -217,3 +217,121 @@ def test_flush_failure_is_non_fatal(tracing, monkeypatch):
 
     monkeypatch.setattr(tracer.client, "flush", unavailable)
     asyncio.run(tracer.aclose())
+
+
+@pytest.mark.parametrize("failure_stage", ["enter", "exit"])
+@pytest.mark.parametrize("business_error", [False, True])
+def test_sdk_context_failures_preserve_business_and_scope(
+    tracing, monkeypatch, failure_stage, business_error,
+):
+    from contextlib import contextmanager
+
+    from app.observability.tracing import mask_content, production_scope
+
+    tracer, _ = tracing
+    received_exceptions = []
+
+    @contextmanager
+    def broken_propagation(**kwargs):
+        if failure_stage == "enter":
+            raise RuntimeError("SDK context entry failed")
+        try:
+            yield
+        except BaseException as exc:
+            received_exceptions.append(exc)
+            raise
+        finally:
+            if failure_stage == "exit":
+                raise RuntimeError("SDK context exit failed")
+
+    monkeypatch.setattr("langfuse.propagate_attributes", broken_propagation)
+    business_exception = ValueError("private business error")
+    calls = []
+
+    def run():
+        with tracer.span("context.failure"):
+            assert production_scope.get() is True
+            assert mask_content(data="PRIVATE") == "[content omitted]"
+            calls.append(1)
+            if business_error:
+                raise business_exception
+
+    if business_error:
+        with pytest.raises(ValueError) as caught:
+            run()
+        assert caught.value is business_exception
+    else:
+        run()
+
+    assert calls == [1]
+    assert received_exceptions == []
+    assert production_scope.get() is False
+    assert mask_content(data="EVAL_INPUT") == "EVAL_INPUT"
+
+
+def test_nested_scope_restores_after_start_and_update_failures(tracing, monkeypatch):
+    from app.observability.tracing import production_scope
+
+    tracer, _ = tracing
+    with tracer.span("scope.outer") as root:
+        with tracer.span("scope.inner"):
+            assert production_scope.get() is True
+        assert production_scope.get() is True
+
+        def unavailable(**kwargs):
+            assert production_scope.get() is False
+            raise RuntimeError("SDK metadata write failed")
+
+        monkeypatch.setattr(root.sdk, "update", unavailable)
+        root.update(status="success")
+        assert production_scope.get() is True
+
+        monkeypatch.setattr(tracer.client, "start_observation", unavailable)
+        with tracer.span("scope.unavailable") as child:
+            assert child.trace_id is None
+            assert production_scope.get() is True
+        assert production_scope.get() is True
+
+    assert production_scope.get() is False
+
+
+def test_export_hooks_use_span_attributes_in_background_thread(tracing):
+    from types import SimpleNamespace
+
+    from app.observability.tracing import (
+        mask_otel_spans, production_scope, set_production_scope, should_export_span,
+    )
+
+    spans = {
+        "production": SimpleNamespace(
+            attributes={
+                "langfuse.observation.metadata.pickwise_source": "production",
+                "langfuse.observation.input": "PRIVATE",
+            },
+            events=("PRIVATE_EXCEPTION",),
+            status=SimpleNamespace(description=None),
+        ),
+        "evaluation": SimpleNamespace(
+            attributes={"langfuse.observation.input": "EVAL_INPUT"},
+            events=(),
+            status=SimpleNamespace(description=None),
+        ),
+    }
+
+    def export():
+        assert production_scope.get() is False
+        result = mask_otel_spans(SimpleNamespace(spans=spans))
+        assert "langfuse.observation.input" in result.span_patches["production"].delete_attributes
+        assert "evaluation" not in result.span_patches
+        assert should_export_span(spans["production"]) is False
+        assert should_export_span(spans["evaluation"]) is True
+
+    async def run():
+        with set_production_scope(False):
+            await asyncio.to_thread(export)
+
+    tracer, _ = tracing
+    with tracer.span("production.request"):
+        asyncio.run(run())
+        assert production_scope.get() is True
+    assert production_scope.get() is False
