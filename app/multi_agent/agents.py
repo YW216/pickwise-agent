@@ -18,6 +18,7 @@ from app.agent.context_budget import (
 )
 from app.agent.tools.manager import ToolManager
 from app.services.chat_events import emit
+from app.observability.tracing import update_current_span
 from app.prompts.agents import (
     CONSULT_MULTI_PROMPT,
     CONSULT_PROMPT,
@@ -98,6 +99,8 @@ class SubAgent:
         seen: dict[str, int] = {}
 
         for i in range(max_steps):
+            # 计数留在当前协程的专家节点，不在共享客户端上保存请求状态。
+            update_current_span(react_steps=i + 1)
             print(f"第 {i+1} 步·[{self.name}]")
             try:
                 response = await self._complete(working, self.tool_manager.tool_definitions)
@@ -191,6 +194,8 @@ class SubAgent:
                 new_messages.append(tool_msg)
                 working.append(tool_msg)
 
+        # 兜底调用也计入实际模型步数，并标明已走步数上限降级。
+        update_current_span(react_steps=max_steps + 1, degraded=True, status="degraded")
         # 兜底策略：超过最大步数时不给工具，让模型基于已有观察给出最终回答
         try:
             response = await self._complete(working, [])
@@ -231,6 +236,7 @@ class SubAgent:
             **({"tools": tools} if tools else {}),
             **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
         )
+        update_current_span(finish_reason=getattr(response.choices[0], "finish_reason", None))
         self.last_prompt_tokens = getattr(getattr(response, "usage", None), "prompt_tokens", None)
         return response
 

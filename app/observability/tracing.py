@@ -27,6 +27,9 @@ production_scope = ContextVar(
     default=False,
 )
 
+# 当前生产节点随协程传播，供 Router 和专家创建子节点、更新安全元数据。
+current_observation = ContextVar("pickwise_current_observation", default=None)
+
 # 生产环境来源标识
 SOURCE = "pickwise_source"
 
@@ -51,6 +54,10 @@ FIELDS = {
     "result_count",
     "recommendation_count",
     "react_steps",
+    "scenarios",
+    "degraded",
+    "finish_reason",
+    "finish_reasons",
     "cache_hit",
     "replayed",
 }
@@ -105,6 +112,8 @@ def activate_observation(observation, *, user_id=None, session_id=None):
                 record_exception=False,
                 set_status_on_exception=False,
             ))
+            token = current_observation.set(observation)
+            contexts.callback(current_observation.reset, token)
             contexts.enter_context(propagate_attributes(
                 user_id=user_id,
                 session_id=session_id,
@@ -124,6 +133,28 @@ def activate_observation(observation, *, user_id=None, session_id=None):
                 pass
 
 
+@contextmanager
+def production_span(name, **fields):
+    """只在已激活的生产聊天链路中创建子节点，评测和普通调用保持原样。
+    只有处在【生产追踪开关打开 + 存在父 span】的时候，才真的创建一个子 span；
+    其他情况直接返回一个空假 Observation，什么都不上报，不影响业务。
+    """
+    parent = current_observation.get()  
+    if not production_scope.get() or parent is None or parent.tracing is None:
+        yield Observation()
+        return
+
+    with parent.tracing.span(name, **fields) as observation:
+        yield observation
+
+
+def update_current_span(**fields):
+    """更新当前生产节点，不记录 Prompt、回答或异常正文。"""
+    observation = current_observation.get()
+    if production_scope.get() and observation is not None:
+        observation.update(**fields)
+
+
 # ============================================================
 # 3. 元数据处理和数据脱敏
 # ============================================================
@@ -137,6 +168,12 @@ def get_metadata(data):
             continue
 
         if not isinstance(value, (str, int, float, bool)):
+            continue
+
+        # 结束原因来自供应商响应，只保留协议中的固定值。
+        if key == "finish_reason" and value not in {
+            "stop", "length", "tool_calls", "content_filter", "function_call",
+        }:
             continue
 
         metadata[key] = value
@@ -229,8 +266,10 @@ def mask_otel_spans(params):
 class Observation:
     """隔离 SDK 更新和结束操作的异常，提供关闭追踪时的空对象。"""
 
-    def __init__(self, sdk=None):
+    def __init__(self, sdk=None, *, tracing=None):
         self.sdk = sdk
+        self.tracing = tracing
+        self.finish_reasons = []
         self.trace_id = None
         self.span_id = None
         if sdk is not None:
@@ -247,9 +286,15 @@ class Observation:
             if fields.get("error_type"):
                 level = "ERROR"
 
+            metadata = get_metadata(fields)
+            # 保存本节点内每次模型调用的固定结束原因，避免 ReAct 后续步骤覆盖前一步。
+            if "finish_reason" in metadata:
+                self.finish_reasons.append(metadata["finish_reason"])
+                metadata["finish_reasons"] = ",".join(self.finish_reasons)
+
             # SDK 对 metadata 也调用内容脱敏器；这里只写已过滤的元数据。
             with set_production_scope(False):
-                self.sdk.update(metadata=get_metadata(fields), level=level)
+                self.sdk.update(metadata=metadata, level=level)
         except Exception:
             pass
 
@@ -327,7 +372,7 @@ class ProductionTracing:
             # 固化生产标记供后台导出读取，避免它被运行时脱敏器屏蔽。
             with set_production_scope(False):
                 sdk = self.client.start_observation(name=name, metadata=metadata)
-            return Observation(sdk)
+            return Observation(sdk, tracing=self)
         except Exception:
             return Observation()
 
@@ -356,7 +401,8 @@ class ProductionTracing:
         except BaseException as exc:
             # 只记录异常类型，不记录异常正文
             observation.update(
-                error_type=type(exc).__name__
+                error_type=type(exc).__name__,
+                status="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
             )
             raise
 

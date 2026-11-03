@@ -10,6 +10,7 @@ from typing import Optional
 from openai import OpenAI
 
 from app.prompts.agents import ROUTER_OUTPUT_INSTRUCTION, ROUTER_PROMPT
+from app.observability.tracing import update_current_span
 
 # 固定优先级顺序，替代旧版无序 set 遍历（修复多值输出命中顺序随机、不可复现的问题）
 SCENARIO_ORDER = ["presale", "consult"]
@@ -81,6 +82,9 @@ class Router:
         )
 
         raw = (response.choices[0].message.content or "").strip()
+        update_current_span(
+            finish_reason=getattr(response.choices[0], "finish_reason", None),
+        )
         return self._parse(raw)
 
     def _parse(self, raw: str) -> list[str]:
@@ -92,6 +96,7 @@ class Router:
         tokens = [t.strip().lower() for t in raw.replace("，", ",").split(",")]
         valid = {t for t in tokens if t in SCENARIO_ORDER}
         if not valid:
+            update_current_span(status="degraded", degraded=True)
             return [DEFAULT_SCENARIO]
         return [s for s in SCENARIO_ORDER if s in valid]
 

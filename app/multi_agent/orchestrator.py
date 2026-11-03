@@ -15,6 +15,7 @@ from typing import Optional
 import asyncio
 from uuid import uuid4
 from app.services.chat_events import emit
+from app.observability.tracing import production_span
 
 #from openai import OpenAI
 from langfuse.openai import AsyncOpenAI
@@ -306,15 +307,28 @@ class MultiAgentOrchestrator:
         # SDK 已负责 HTTP 层重试，这里不再叠加传输重试，只做瞬时故障降级。
         emit(events, "status", stage="routing", state="running",
              message="正在识别预算、使用场景和关注重点")
-        try:
-            scenarios = await self.router.route(user_input, pack.history, summary=pack.summary)
-        except Exception as exc:
-            if is_transient(exc):
-                # 默认咨询可能不能完成推荐诉求：明确记为降级，而不是无损成功。
-                self._record_failure("router", exc)
-                scenarios = [DEFAULT_SCENARIO]
-            else:
-                raise
+        with production_span("router", status="success", degraded=False) as observation:
+            try:
+                scenarios = await self.router.route(user_input, pack.history, summary=pack.summary)
+            except Exception as exc:
+                if is_transient(exc):
+                    # 沿用现有降级，只记录类型和固定场景名称。
+                    self._record_failure("router", exc)
+                    scenarios = [DEFAULT_SCENARIO]
+                    observation.update(
+                        status="degraded", degraded=True, error_type=type(exc).__name__,
+                    )
+                else:
+                    raise
+
+            """
+            `observation.update()`：更新这个 span 上面的字段
+                追加两个业务信息：识别出来的场景列表 scenarios、是单场景 / 多场景 mode
+            """
+            observation.update(
+                scenarios=",".join(scenarios),
+                mode="single" if len(scenarios) == 1 else "multi",
+            )
         emit(events, "status", stage="routing", state="done",
              message="已完成需求分析，开始匹配商品和资料")
         mode = "single" if len(scenarios) == 1 else "multi"
@@ -502,56 +516,64 @@ class MultiAgentOrchestrator:
         """
 
         async def run(key: str) -> BlackboardEntry:
-            agent = self.agents[key]
-            step_id = f"agent:{key}:{uuid4().hex}"
-            agent_message = (
-                "正在根据预算和使用场景筛选商品"
-                if key == "presale" else "正在查询相关选购资料"
-            )
-            emit(events, "status", stage=step_id, agent=key, state="running",
-                 message=agent_message)
-            # 技能目录按 Agent 归属过滤（pack 共享只读，per-agent 目录用轻量副本注入）
-            agent_pack = replace(pack, skill_catalog=self._skill_catalog_for(key))
-            try:
-                messages = build_working_messages(
-                    agent_pack, AGENT_CONFIGS[key], mode,
-                    project_history=not self.disable_context_projection,
+            # 每个协程各自激活专家节点，并行专家保持同级。
+            with production_span(
+                f"agent.{key}", agent=key, mode=mode,
+                status="success", degraded=False, react_steps=0,
+            ) as observation:
+                agent = self.agents[key]
+                step_id = f"agent:{key}:{uuid4().hex}"
+                agent_message = (
+                    "正在根据预算和使用场景筛选商品"
+                    if key == "presale" else "正在查询相关选购资料"
                 )
+                emit(events, "status", stage=step_id, agent=key, state="running",
+                     message=agent_message)
+                # 技能目录按 Agent 归属过滤（pack 共享只读，per-agent 目录用轻量副本注入）
+                agent_pack = replace(pack, skill_catalog=self._skill_catalog_for(key))
+                try:
+                    messages = build_working_messages(
+                        agent_pack, AGENT_CONFIGS[key], mode,
+                        project_history=not self.disable_context_projection,
+                    )
 
-                _, new_messages = await agent.handle(
-                    messages, max_steps=self.max_react_steps,
-                    **({"events": events, "agent_key": key} if events is not None else {}),
-                )
-                if (
-                    not new_messages
-                    or new_messages[-1].get("role") != "assistant"
-                    or new_messages[-1].get("tool_calls")
-                    or not isinstance(new_messages[-1].get("content"), str)
-                    or not new_messages[-1]["content"].strip()
-                ):
-                    raise ValueError("专家未返回有效的最终答复")
-                emit(events, "status", stage=step_id, agent=key, state="done",
-                     message=("商品筛选完成" if key == "presale" else "资料查询完成"))
-                return BlackboardEntry(
-                    agent=key, status="success", error=None,
-                    new_messages=new_messages,
-                )
-            except ContextOverflowError as exc:
-                emit(events, "status", stage=step_id, agent=key, state="failed",
-                     message="上下文过长，正在尝试压缩")
-                return BlackboardEntry(
-                    agent=key, status="overflow", error=str(exc), new_messages=[],
-                    error_type=type(exc).__name__,
-                )
-            except Exception as e:  # 宽捕获：失败进黑板，不中断其余 Agent
-                emit(events, "status", stage=step_id, agent=key, state="failed",
-                     message=("商品筛选暂时未完成" if key == "presale"
-                              else "资料查询暂时未完成"))
-                return BlackboardEntry(
-                    agent=key, status="failed", error=str(e), new_messages=[],
-                    error_type=type(e).__name__,
-                )
-                
+                    _, new_messages = await agent.handle(
+                        messages, max_steps=self.max_react_steps,
+                        **({"events": events, "agent_key": key} if events is not None else {}),
+                    )
+                    if (
+                        not new_messages
+                        or new_messages[-1].get("role") != "assistant"
+                        or new_messages[-1].get("tool_calls")
+                        or not isinstance(new_messages[-1].get("content"), str)
+                        or not new_messages[-1]["content"].strip()
+                    ):
+                        raise ValueError("专家未返回有效的最终答复")
+                    emit(events, "status", stage=step_id, agent=key, state="done",
+                         message=("商品筛选完成" if key == "presale" else "资料查询完成"))
+                    observation.update(answer_length=len(new_messages[-1]["content"]))
+                    return BlackboardEntry(
+                        agent=key, status="success", error=None,
+                        new_messages=new_messages,
+                    )
+                except ContextOverflowError as exc:
+                    observation.update(status="overflow", error_type=type(exc).__name__)
+                    emit(events, "status", stage=step_id, agent=key, state="failed",
+                         message="上下文过长，正在尝试压缩")
+                    return BlackboardEntry(
+                        agent=key, status="overflow", error=str(exc), new_messages=[],
+                        error_type=type(exc).__name__,
+                    )
+                except Exception as e:  # 宽捕获：失败进黑板，不中断其余 Agent
+                    observation.update(status="failed", error_type=type(e).__name__)
+                    emit(events, "status", stage=step_id, agent=key, state="failed",
+                         message=("商品筛选暂时未完成" if key == "presale"
+                                  else "资料查询暂时未完成"))
+                    return BlackboardEntry(
+                        agent=key, status="failed", error=str(e), new_messages=[],
+                        error_type=type(e).__name__,
+                    )
+
         # 多 Agent 并行（阶段二起为协程并发）：等待模型期间不占线程，
         # 并发上限由 LLM 闸门统一控制（不再依赖线程数）
         results_list = await asyncio.gather(*(run(key) for key in scenarios))
@@ -580,34 +602,45 @@ class MultiAgentOrchestrator:
         self, entries: list[BlackboardEntry], user_input: str,
     ) -> str:
         """Result 读黑板整合；故障/空正文保留专家结论，不把内部异常传给用户。"""
-        if not any(entry.status == "success" for entry in entries):
-            return self._result_fallback(entries)
-        try:
-            board_text = render_blackboard(entries, self.tool_result_max_chars)
-            messages = [
-                {"role": "system", "content": RESULT_PROMPT},
-                {"role": "user", "content": (
-                    f"用户原始问题：\n{user_input}\n\n各专家工作记录：\n{board_text}"
-                )},
-            ]
-            if estimate_messages_tokens(messages) > self.context_window - self.reserve_tokens:
-                raise ContextOverflowError("汇总上下文超过预算")
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.reserve_tokens,
-                **({"reasoning_effort": settings.reasoning_effort}
-                   if settings.reasoning_effort else {}),
-            )
-            choice = response.choices[0]
-            content = choice.message.content or ""
-            if not content.strip() or getattr(choice, "finish_reason", None) == "length":
-                raise ValueError("汇总未返回完整有效正文")
-            return content
-        except Exception as exc:
-            self._record_failure("result", exc)
-            return self._result_fallback(entries)
+        partial = any(entry.status != "success" for entry in entries)
+        with production_span(
+            "agent.result", agent="result", mode="multi",
+            status="degraded" if partial else "success", degraded=partial,
+        ) as observation:
+            if not any(entry.status == "success" for entry in entries):
+                observation.update(status="degraded", degraded=True)
+                return self._result_fallback(entries)
+            try:
+                board_text = render_blackboard(entries, self.tool_result_max_chars)
+                messages = [
+                    {"role": "system", "content": RESULT_PROMPT},
+                    {"role": "user", "content": (
+                        f"用户原始问题：\n{user_input}\n\n各专家工作记录：\n{board_text}"
+                    )},
+                ]
+                if estimate_messages_tokens(messages) > self.context_window - self.reserve_tokens:
+                    raise ContextOverflowError("汇总上下文超过预算")
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.reserve_tokens,
+                    **({"reasoning_effort": settings.reasoning_effort}
+                       if settings.reasoning_effort else {}),
+                )
+                choice = response.choices[0]
+                observation.update(finish_reason=getattr(choice, "finish_reason", None))
+                content = choice.message.content or ""
+                if not content.strip() or getattr(choice, "finish_reason", None) == "length":
+                    raise ValueError("汇总未返回完整有效正文")
+                observation.update(answer_length=len(content))
+                return content
+            except Exception as exc:
+                observation.update(
+                    status="degraded", degraded=True, error_type=type(exc).__name__,
+                )
+                self._record_failure("result", exc)
+                return self._result_fallback(entries)
 
     @staticmethod
     def _result_fallback(entries: list[BlackboardEntry]) -> str:
@@ -654,7 +687,7 @@ class MultiAgentOrchestrator:
             return False
 
         context_tokens = self._estimate_context_tokens(pack)
-        
+
         # 非强制压缩且上下文未超过预算，直接返回。
         if not force and not should_compact(
             context_tokens, self.context_window, self.reserve_tokens,
