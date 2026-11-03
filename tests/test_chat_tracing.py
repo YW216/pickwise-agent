@@ -114,7 +114,7 @@ def test_chat_root_trace_covers_execution_and_idempotent_replay(
 
     assert replay_trace.ended
     assert replay_trace.updates[-1]["replayed"] is True
-    assert replay_trace.updates[-1]["execution_status"] == "skipped"
+    assert replay_trace.updates[-1]["execution_status"] == "success"
     assert replay_trace.updates[-1]["idempotency_status"] == "replay"
 
     recorded_data = repr([
@@ -128,13 +128,13 @@ def test_chat_root_trace_covers_execution_and_idempotent_replay(
 @pytest.mark.parametrize(
     "scenario,expected_http,expected_status,expected_idempotency,expected_execution",
     [
-        ("invalid", 422, "rejected", "invalid", "not_started"),
-        ("conflict", 409, "rejected", "conflict", "not_started"),
-        ("in_progress", 409, "rejected", "in_progress", "not_started"),
-        ("begin_unavailable", 503, "error", "unavailable", "not_started"),
-        ("finish_unavailable", 200, "success", "persistence_failed", "success"),
-        ("answer_failure", 503, "error", "finished", "failed"),
-        ("execution_error", 500, "error", "finished", "failed"),
+        ("invalid", 422, "rejected", "invalid", "rejected"),
+        ("conflict", 409, "rejected", "conflict", "rejected"),
+        ("in_progress", 409, "rejected", "in_progress", "rejected"),
+        ("begin_unavailable", 503, "error", "unavailable", "failed"),
+        ("finish_unavailable", 200, "success", "persistence_failed", "degraded"),
+        ("answer_failure", 503, "error", "execute", "failed"),
+        ("execution_error", 500, "error", "execute", "failed"),
     ],
 )
 def test_chat_errors_preserve_response_and_trace(
@@ -216,7 +216,8 @@ def test_chat_errors_preserve_response_and_trace(
             assert replay.status_code == expected_http
             assert replay.headers["X-Idempotent-Replay"] == "true"
             assert tracing.records[-1].updates[-1]["replayed"] is True
-            assert tracing.records[-1].updates[-1]["execution_status"] == "skipped"
+            replay_status = "success" if expected_http < 500 else "failed"
+            assert tracing.records[-1].updates[-1]["execution_status"] == replay_status
             assert next(iter(factory.agents.values())).chat_total == 1
 
     trace = tracing.records[0]
@@ -299,7 +300,7 @@ def test_sse_disconnect_keeps_trace_open_until_background_save_finishes(tmp_path
             await asyncio.wait_for(task, timeout=3)
 
             assert tracing.records[0].ended
-            assert tracing.records[0].updates[-1]["idempotency_status"] == "finished"
+            assert tracing.records[0].updates[-1]["idempotency_status"] == "execute"
             agent = next(iter(factory.agents.values()))
             assert agent.active_trace is tracing.records[0]
             fingerprint = hash_request({

@@ -18,7 +18,7 @@ from app.agent.context_budget import (
 )
 from app.agent.tools.manager import ToolManager
 from app.services.chat_events import emit
-from app.observability.tracing import update_current_span
+from app.observability.tracing import production_span, update_current_span
 from app.prompts.agents import (
     CONSULT_MULTI_PROMPT,
     CONSULT_PROMPT,
@@ -162,25 +162,63 @@ class SubAgent:
                              "tool": tc.function.name, "call_id": call_id}
                 emit(events, "tool.started", **tool_info,
                      message=_tool_message(tc.function.name))
-                try:
-                    result_str = await self.tool_manager.aexecute_call_as_message(
-                        tc.function.name, tc.function.arguments, seen,
+                with production_span(
+                    f"tool.{tc.function.name}",
+                    tool=tc.function.name,
+                    agent=agent_key or self.name,
+                    tool_call_id=tc.id,
+                    status="success",
+                ) as observation:
+                    try:
+                        result_str = await self.tool_manager.aexecute_call_as_message(
+                            tc.function.name, tc.function.arguments, seen,
+                        )
+                    except Exception as exc:
+                        observation.update(
+                            status="failed",
+                            degraded=True,
+                            error_type=type(exc).__name__,
+                        )
+                        emit(events, "tool.failed", **tool_info, message="工具执行失败")
+                        raise
+
+                    summary_succeeded, summary, result_count = _tool_summary(
+                        tc.function.name, result_str,
                     )
-                except Exception:
-                    emit(events, "tool.failed", **tool_info, message="工具执行失败")
-                    raise
+                    try:
+                        result_envelope = json.loads(result_str)
+                    except (TypeError, ValueError):
+                        result_envelope = None
+
+                    if isinstance(result_envelope, dict) and result_envelope.get("success") is True:
+                        data = result_envelope.get("data") or {}
+                        if result_count is None and isinstance(data, dict):
+                            if isinstance(data.get("product"), dict):
+                                result_count = 1
+                        observation.update(
+                            status="success",
+                            result_count=result_count,
+                        )
+                    else:
+                        if isinstance(result_envelope, dict):
+                            error_type = "ToolResultFailure"
+                        else:
+                            error_type = "ToolResultInvalid"
+                        observation.update(
+                            status="failed",
+                            degraded=True,
+                            error_type=error_type,
+                            result_count=result_count,
+                        )
                 
                 self._print_action(tc.function.name, tc.function.arguments)
                 self._print_observation(result_str)
 
                 if events is not None:
-                    succeeded, summary, count = _tool_summary(
-                        tc.function.name, result_str,
-                    )
-                    event_name = "tool.finished" if succeeded else "tool.failed"
-                    state = "done" if succeeded else "partial"
+                    event_name = "tool.finished" if summary_succeeded else "tool.failed"
+                    state = "done" if summary_succeeded else "partial"
                     emit(events, event_name, **tool_info, state=state,
-                         message=summary, summary=summary, count=count)
+                         message=summary, summary=summary, count=result_count)
 
                 # 入库即截断：存下来的就是模型看到的（单一真相）。
                 # 不再"全量入账 + 发送前另做一份视图"，两者也就不会再漂移。

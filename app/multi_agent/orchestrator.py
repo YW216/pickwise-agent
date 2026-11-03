@@ -45,6 +45,7 @@ from app.agent.tools.manager import ToolManager
 from app.multi_agent.context_pack import ContextPack, build_working_messages
 from app.prompts.agents import RESULT_PROMPT
 from app.identity import SessionIdentity, validate_user_id
+from app.observability.tracing import production_span
 
 
 class MultiAgentOrchestrator:
@@ -205,11 +206,14 @@ class MultiAgentOrchestrator:
         内部错误只记录到 last_failures，不输出日志；用户只看到能力级提示。
         """
         self.last_failures = []
+        self.last_answer_status = "not_generated"
+        self.last_execution_status = "success"
         turn_started = False
         completed = False
         try:
             input_tokens = estimate_text_tokens(user_input)
             if input_tokens > self.max_user_input_tokens:
+                self.last_execution_status = "rejected"
                 return (
                     f"输入过长（约 {input_tokens} token，上限 "
                     f"{self.max_user_input_tokens}），请精简或分段提问。"
@@ -223,16 +227,43 @@ class MultiAgentOrchestrator:
             )
             completed = True
         except Exception as exc:  # 最外层保护用户体验；错误不靠静默吞掉处理
+            self.last_answer_status = "failed"
+            self.last_execution_status = "failed"
             reply = self._on_failure(user_input, exc)
             if turn_started:
                 self.raw_messages.append({"role": "assistant", "content": reply})
 
+        if completed and self.last_failures and self.last_answer_status == "success":
+            self.last_execution_status = "degraded"
+
         if turn_started:
-            if completed:
-                try:
-                    await self.memory_manager.update_short_term(self.raw_messages[-6:])
-                except Exception as exc:
-                    self._record_failure("memory", exc, affects_answer=False)
+            with production_span(
+                "memory.update",
+                memory="short_term",
+                status="success",
+                memory_status="success",
+            ) as observation:
+                memory_enabled = getattr(self.memory_manager, "memory_enabled", True)
+                if not completed or not memory_enabled:
+                    observation.update(
+                        status="not_executed",
+                        memory_status="not_executed",
+                    )
+                else:
+                    try:
+                        await self.memory_manager.update_short_term(self.raw_messages[-6:])
+                    except Exception as exc:
+                        observation.update(
+                            status="failed",
+                            memory_status="failed",
+                            error_type=type(exc).__name__,
+                            failure_stage="memory.update",
+                        )
+                        self._record_failure("memory", exc, affects_answer=False)
+                        if self.last_answer_status == "success":
+                            self.last_execution_status = "degraded"
+                    else:
+                        observation.update(memory_status="success")
             if self.persistence_enabled:
                 self._save_safely()
         return reply
@@ -252,10 +283,24 @@ class MultiAgentOrchestrator:
 
     def _save_safely(self) -> None:
         """本轮只尝试一次落盘；失败保留内存会话与答复，并明确留下诊断记录。"""
-        try:
-            self.save()
-        except Exception as exc:
-            self._record_failure("persistence", exc, affects_answer=False)
+        with production_span(
+            "conversation.save",
+            store="agent_file",
+            status="success",
+            persistence_status="success",
+        ) as observation:
+            try:
+                self.save()
+            except Exception as exc:
+                observation.update(
+                    status="failed",
+                    persistence_status="failed",
+                    error_type=type(exc).__name__,
+                    failure_stage="conversation.save",
+                )
+                self._record_failure("persistence", exc, affects_answer=False)
+                if self.last_answer_status == "success":
+                    self.last_execution_status = "degraded"
 
     def _on_failure(self, user_input: str, exc: Exception) -> str:
         """只生成失败话术与诊断；历史提交/保存由 chat 单点负责。"""
@@ -348,6 +393,14 @@ class MultiAgentOrchestrator:
                     "affects_answer": True,
                 })
 
+        successful_entries = [entry for entry in entries if entry.status == "success"]
+        if len(successful_entries) == len(entries):
+            self.last_execution_status = "success"
+        elif successful_entries:
+            self.last_execution_status = "degraded"
+        else:
+            self.last_execution_status = "failed"
+
         if len(entries) == 1:
             entry = entries[0]
             if entry.status == "failed":
@@ -355,12 +408,17 @@ class MultiAgentOrchestrator:
             # 单 Agent：最终答复直返（new_messages 尾部，10.5 位置约定）
             reply = entry.new_messages[-1]["content"]
             self.raw_messages.extend(entry.new_messages)
+            self.last_answer_status = "success"
         else:
             emit(events, "status", stage="result", state="running",
                  message="正在综合商品信息和选购资料")
             reply = await self._run_result_agent(entries, user_input)
             emit(events, "status", stage="result", state="done",
                  message="已完成候选商品比较，正在生成建议")
+            if successful_entries:
+                self.last_answer_status = "success"
+            else:
+                self.last_answer_status = "failed"
             # full 档合并：各 Agent 工具消息对原样存档（[:-1]，成对约束天然满足），
             # Result 整合文本永远最后一条（设计文档 10.4）
             for entry in entries:
@@ -539,7 +597,8 @@ class MultiAgentOrchestrator:
 
                     _, new_messages = await agent.handle(
                         messages, max_steps=self.max_react_steps,
-                        **({"events": events, "agent_key": key} if events is not None else {}),
+                        **({"events": events} if events is not None else {}),
+                        agent_key=key,
                     )
                     if (
                         not new_messages

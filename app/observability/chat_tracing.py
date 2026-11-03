@@ -3,46 +3,81 @@
 
 def finish_chat_trace(
     trace, *, idempotency_status, response=None, status=None,
+    execution_status=None, answer_status=None, persistence_status=None,
     failure_stage=None, error_type=None, replayed=False, **extra_fields,
 ):
     """整理聊天结果并结束根节点，不参与聊天执行和幂等判断。"""
+    if idempotency_status == "not_provided":
+        idempotency_status = "not_used"
+    elif idempotency_status == "finished":
+        idempotency_status = "execute"
+
     if status is None:
-        if response is None or response.status_code >= 500:
-            status = "error"
-        elif response.status_code >= 400:
+        if response is not None:
+            if response.status_code >= 500:
+                status = "error"
+            elif response.status_code >= 400:
+                status = "rejected"
+            else:
+                status = "success"
+        elif execution_status == "cancelled":
+            status = "cancelled"
+        elif execution_status == "rejected":
             status = "rejected"
+        elif execution_status == "failed":
+            status = "error"
         else:
             status = "success"
 
+    if execution_status is None:
+        if replayed and response is not None and response.status_code < 400:
+            execution_status = "success"
+        elif response is not None and 400 <= response.status_code < 500:
+            execution_status = "rejected"
+        elif response is not None and response.status_code >= 500:
+            execution_status = "failed"
+        elif getattr(trace, "degraded", False):
+            execution_status = "degraded"
+        else:
+            execution_status = "success"
+
+    if getattr(trace, "degraded", False) and execution_status == "success":
+        execution_status = "degraded"
+
+    if answer_status is None:
+        if response is not None and response.status_code < 400:
+            answer_status = "success"
+        elif execution_status in {"rejected", "cancelled"}:
+            answer_status = "not_generated"
+        else:
+            answer_status = "failed"
+
+    if persistence_status is None:
+        if response is not None and response.status_code < 400 and not replayed:
+            persistence_status = "success"
+        else:
+            persistence_status = "not_executed"
+
+    if response is not None and response.headers.get("X-Idempotency-Persisted") == "false":
+        idempotency_status = "persistence_failed"
+        if execution_status == "success":
+            execution_status = "degraded"
+
+    if failure_stage is None:
+        failure_stage = getattr(trace, "failure_stage", None)
+
     fields = {
         "status": status,
-        "replayed": replayed,
+        "execution_status": execution_status,
+        "answer_status": answer_status,
+        "persistence_status": persistence_status,
         "idempotency_status": idempotency_status,
+        "replayed": replayed,
     }
     if failure_stage:
         fields["failure_stage"] = failure_stage
     if error_type:
         fields["error_type"] = error_type
-
-    if response is not None:
-        if replayed:
-            fields["execution_status"] = "skipped"
-            if response.status_code < 400:
-                fields["answer_status"] = "success"
-        elif response.status_code < 400:
-            fields["execution_status"] = "success"
-            fields["answer_status"] = "success"
-        elif failure_stage in {"identity", "product_ref", "idempotency", "session"}:
-            fields["execution_status"] = "not_started"
-        elif response.status_code >= 500:
-            fields["execution_status"] = "failed"
-            if failure_stage in {"agent", "chat"}:
-                fields["answer_status"] = "failed"
-        else:
-            fields["execution_status"] = "rejected"
-
-        if response.headers.get("X-Idempotency-Persisted") == "false":
-            fields["idempotency_status"] = "persistence_failed"
 
     fields.update(extra_fields)
 

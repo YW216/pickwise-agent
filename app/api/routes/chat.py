@@ -18,6 +18,7 @@ from app.api.schemas import ChatRequest
 from app.config.settings import settings
 from app.identity import SessionIdentity
 from app.observability.chat_tracing import finish_chat_trace
+from app.observability.tracing import production_span
 from app.services.idempotency import IdempotencyStore, hash_request, validate_idempotency_key
 from app.services.product_refs import resolve_product_context
 from app.services.session_manager import ChatOutcome, SessionManager, SessionManagerError
@@ -60,21 +61,18 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
         mode=mode,
         message_length=len(body.message),
     )
-    if idempotency_key is not None:
-        idempotency_status = "provided"
-    else:
-        idempotency_status = "not_provided"
-
     try:
         identity = identity_for(user, body.session_id)
     except HTTPException:
         finish_chat_trace(
             trace,
-            idempotency_status=idempotency_status,
+            idempotency_status="not_used",
             status="rejected",
+            execution_status="rejected",
+            answer_status="not_generated",
+            persistence_status="not_executed",
             failure_stage="identity",
             error_type="HTTPException",
-            execution_status="not_started",
         )
         raise
 
@@ -89,26 +87,65 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
                 )
                 finish_chat_trace(
                     trace,
-                    idempotency_status=idempotency_status,
+                    idempotency_status="not_used",
                     response=response,
+                    execution_status="rejected",
+                    answer_status="not_generated",
+                    persistence_status="not_executed",
                     failure_stage="product_ref",
                     error_type="PRODUCT_REF_INVALID",
                 )
                 return response
             product_context.append(item)
 
-        decision = await _check_chat_idempotency(
-            request.app.state.idempotency_store,
-            identity, body, idempotency_key, request_id, stream=stream,
-        )
+        with production_span(
+            "idempotency.check",
+            status="success" if idempotency_key is not None else "not_executed",
+            idempotency_status="execute" if idempotency_key is not None else "not_used",
+        ) as observation:
+            decision = await _check_chat_idempotency(
+                request.app.state.idempotency_store,
+                identity, body, idempotency_key, request_id, stream=stream,
+            )
+            decision_status = decision.status
+            if decision_status == "not_provided":
+                decision_status = "not_used"
+
+            span_status = "success"
+            if decision.status in {"invalid", "conflict", "in_progress"}:
+                span_status = "rejected"
+            elif decision.status == "unavailable":
+                span_status = "failed"
+            elif decision.status == "not_provided":
+                span_status = "not_executed"
+
+            observation.update(
+                status=span_status,
+                idempotency_status=decision_status,
+                error_type=decision.error_type,
+            )
 
     if decision.response is not None:
         replayed = decision.status == "replay"
         failure_stage = None if replayed else "idempotency"
+        if decision.response.status_code >= 500:
+            execution_status = "failed"
+            answer_status = "failed" if replayed else "not_generated"
+        elif decision.response.status_code >= 400:
+            execution_status = "failed" if replayed else "rejected"
+            answer_status = "not_generated"
+        else:
+            execution_status = "success"
+            answer_status = "success"
         finish_chat_trace(
             trace,
-            idempotency_status=decision.status,
+            idempotency_status=(
+                "not_used" if decision.status == "not_provided" else decision.status
+            ),
             response=decision.response,
+            execution_status=execution_status,
+            answer_status=answer_status,
+            persistence_status="not_executed",
             failure_stage=failure_stage,
             error_type=decision.error_type,
             replayed=replayed,
@@ -132,11 +169,15 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
             response = await _save_idempotency_result(
                 request, identity, decision.key, decision.request_hash, response,
             )
-            idempotency_status = "finished" if decision.key else decision.status
             finish_chat_trace(
                 trace,
-                idempotency_status=idempotency_status,
+                idempotency_status=("execute" if decision.key else "not_used"),
                 response=response,
+                execution_status=(
+                    "rejected" if response.status_code < 500 else "failed"
+                ),
+                answer_status="not_generated",
+                persistence_status="not_executed",
                 failure_stage="session",
                 error_type=type(exc).__name__,
             )
@@ -144,7 +185,11 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
 
     async def run():
         answer_length = None
-        persistence_status = None
+        execution_status = "success"
+        answer_status = "not_generated"
+        persistence_status = "not_executed"
+        failure_stage = None
+        error_type = None
         try:
             with trace.activate(user_id=identity.user_id, session_id=identity.session_id):
                 try:
@@ -158,16 +203,30 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
                     response = session_error(exc, request_id)
                     failure_stage = "session"
                     error_type = type(exc).__name__
+                    if response.status_code < 500:
+                        execution_status = "rejected"
+                    else:
+                        execution_status = "failed"
                 except Exception as exc:
                     response = error(
                         500, "CHAT_INTERNAL_ERROR", "服务内部错误，请稍后重试", request_id,
                     )
+                    execution_status = "failed"
+                    answer_status = "failed"
                     failure_stage = "chat"
                     error_type = type(exc).__name__
                 else:
                     response = _chat_response(identity, outcome, request_id)
-                    failure_stage = "agent" if outcome.failed else None
-                    error_type = "CHAT_FAILED" if outcome.failed else None
+                    execution_status = outcome.execution_status
+                    answer_status = outcome.answer_status
+                    failure_stage = outcome.failure_stage
+                    error_type = outcome.error_type
+                    if outcome.failed and answer_status == "success":
+                        execution_status = "degraded"
+                    if outcome.failed and failure_stage is None:
+                        failure_stage = "agent"
+                    if outcome.failed and error_type is None:
+                        error_type = "CHAT_FAILED"
                     answer_length = len(outcome.reply)
                     persistence_status = "success" if outcome.persisted else "failed"
 
@@ -180,22 +239,29 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
                         events.get_nowait()
                     events.put_nowait(None)
 
-                idempotency_status = "finished" if decision.key else decision.status
+                idempotency_status = "execute" if decision.key else "not_used"
                 finish_chat_trace(
                     trace,
                     idempotency_status=idempotency_status,
                     response=response,
+                    execution_status=execution_status,
+                    answer_status=answer_status,
+                    persistence_status=persistence_status,
                     failure_stage=failure_stage,
                     error_type=error_type,
                     answer_length=answer_length,
-                    persistence_status=persistence_status,
                 )
                 return response
         except BaseException as exc:
+            cancelled = isinstance(exc, asyncio.CancelledError)
             finish_chat_trace(
                 trace,
-                idempotency_status=decision.status,
-                failure_stage="chat",
+                idempotency_status="execute" if decision.key else "not_used",
+                status="cancelled" if cancelled else "error",
+                execution_status="cancelled" if cancelled else "failed",
+                answer_status=answer_status,
+                persistence_status=persistence_status,
+                failure_stage=failure_stage or "chat",
                 error_type=type(exc).__name__,
             )
             raise

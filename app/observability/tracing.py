@@ -58,6 +58,12 @@ FIELDS = {
     "degraded",
     "finish_reason",
     "finish_reasons",
+    "agent_reused",
+    "agent_initialized",
+    "state_restored",
+    "memory",
+    "memory_status",
+    "store",
     "cache_hit",
     "replayed",
 }
@@ -135,17 +141,26 @@ def activate_observation(observation, *, user_id=None, session_id=None):
 
 @contextmanager
 def production_span(name, **fields):
-    """只在已激活的生产聊天链路中创建子节点，评测和普通调用保持原样。
-    只有处在【生产追踪开关打开 + 存在父 span】的时候，才真的创建一个子 span；
-    其他情况直接返回一个空假 Observation，什么都不上报，不影响业务。
-    """
-    parent = current_observation.get()  
+    """只在生产聊天链路中创建子节点，其他调用直接空跑。"""
+    parent = current_observation.get()
     if not production_scope.get() or parent is None or parent.tracing is None:
-        yield Observation()
+        observation = Observation()
+        yield observation
         return
 
-    with parent.tracing.span(name, **fields) as observation:
-        yield observation
+    observation = None
+    try:
+        with parent.tracing.span(name, **fields) as observation:
+            yield observation
+    finally:
+        # 子步骤发生降级时逐层通知父节点，最终由聊天根节点给出整体状态。
+        if observation is not None and observation.degraded:
+            parent.update(
+                status="degraded",
+                degraded=True,
+                failure_stage=observation.failure_stage or name,
+                error_type=observation.error_type,
+            )
 
 
 def update_current_span(**fields):
@@ -270,6 +285,9 @@ class Observation:
         self.sdk = sdk
         self.tracing = tracing
         self.finish_reasons = []
+        self.degraded = False
+        self.failure_stage = None
+        self.error_type = None
         self.trace_id = None
         self.span_id = None
         if sdk is not None:
@@ -278,6 +296,15 @@ class Observation:
 
     def update(self, **fields):
         """仅更新白名单元数据，不记录异常正文。"""
+        if fields.get("degraded") is True or fields.get("status") in {
+            "failed", "degraded", "overflow",
+        }:
+            self.degraded = True
+        if fields.get("failure_stage"):
+            self.failure_stage = fields["failure_stage"]
+        if fields.get("error_type"):
+            self.error_type = fields["error_type"]
+
         if self.sdk is None:
             return
 
@@ -372,7 +399,14 @@ class ProductionTracing:
             # 固化生产标记供后台导出读取，避免它被运行时脱敏器屏蔽。
             with set_production_scope(False):
                 sdk = self.client.start_observation(name=name, metadata=metadata)
-            return Observation(sdk, tracing=self)
+            observation = Observation(sdk, tracing=self)
+            observation.degraded = (
+                metadata.get("degraded") is True
+                or metadata.get("status") in {"failed", "degraded", "overflow"}
+            )
+            observation.failure_stage = metadata.get("failure_stage")
+            observation.error_type = metadata.get("error_type")
+            return observation
         except Exception:
             return Observation()
 

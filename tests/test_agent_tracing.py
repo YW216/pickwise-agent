@@ -23,7 +23,8 @@ def model_run(tracing, tmp_path):
     async def run(
         scenarios="presale,consult", *, failures=(), result_empty=False,
         production=True, requests=1, invalid_route=False, max_steps=5,
-        tool_turn=False, child_sdk_failure=False, router_unavailable=False,
+        tool_turn=False, tool_result='{"success": true, "data": {"product": {}}}',
+        child_sdk_failure=False, router_unavailable=False, memory_failure=False,
     ):
         from langfuse.openai import AsyncOpenAI
 
@@ -81,7 +82,10 @@ def model_run(tracing, tmp_path):
                 finish_reason = "tool_calls"
                 message["tool_calls"] = [{
                     "id": "private-tool-call", "type": "function",
-                    "function": {"name": "get_detail", "arguments": "{}"},
+                    "function": {
+                        "name": "get_detail",
+                        "arguments": '{"secret":"PRIVATE_TOOL_ARGUMENT"}',
+                    },
                 }]
             return httpx.Response(200, json={
                 "id": "chatcmpl-local", "object": "chat.completion", "created": 1,
@@ -110,9 +114,14 @@ def model_run(tracing, tmp_path):
                 )
                 orch.compaction_enabled = False
                 orch.max_react_steps = max_steps
+                if memory_failure:
+                    orch.memory_manager.memory_enabled = True
+                    orch.memory_manager.update_short_term = AsyncMock(
+                        side_effect=RuntimeError("PRIVATE_MEMORY_FAILURE"),
+                    )
                 if tool_turn:
                     orch.agents["presale"].tool_manager.aexecute_call_as_message = AsyncMock(
-                        return_value='{"success": true, "data": {"product": {}}}',
+                        return_value=tool_result,
                     )
                 orchs.append(orch)
                 if not production:
@@ -149,7 +158,7 @@ def test_real_agent_tree_and_automatic_generations(model_run, scenarios):
     result = asyncio.run(model_run(scenarios))
     spans = {span.name: span for span in result.spans if span.name != "OpenAI-generation"}
     root = spans["pickwise.chat"]
-    names = {"router", "agent.presale"}
+    names = {"router", "agent.presale", "memory.update"}
     if "," in scenarios:
         names.update({"agent.consult", "agent.result"})
     assert set(spans) == names | {"pickwise.chat"}
@@ -157,8 +166,10 @@ def test_real_agent_tree_and_automatic_generations(model_run, scenarios):
         assert spans[name].parent.span_id == root.context.span_id
         assert spans[name].context.trace_id == root.context.trace_id
         assert spans[name].attributes["session.id"] == "session-0"
-        assert spans[name].attributes["langfuse.observation.metadata.status"] == "success"
-        assert spans[name].attributes["langfuse.observation.metadata.finish_reason"] == "stop"
+        expected_status = "not_executed" if name == "memory.update" else "success"
+        assert spans[name].attributes["langfuse.observation.metadata.status"] == expected_status
+        if name != "memory.update":
+            assert spans[name].attributes["langfuse.observation.metadata.finish_reason"] == "stop"
     for key in scenarios.split(","):
         assert spans[f"agent.{key}"].attributes["langfuse.observation.metadata.react_steps"] == 1
         assert spans[f"agent.{key}"].attributes["langfuse.observation.metadata.mode"] == (
@@ -166,8 +177,9 @@ def test_real_agent_tree_and_automatic_generations(model_run, scenarios):
         )
     assert spans["router"].attributes["langfuse.observation.metadata.scenarios"] == scenarios
     generations = [s for s in result.spans if s.attributes.get("langfuse.observation.type") == "generation"]
-    assert len(generations) == result.generation_count == len(names)
-    assert {g.parent.span_id for g in generations} == {spans[name].context.span_id for name in names}
+    model_spans = names - {"memory.update"}
+    assert len(generations) == result.generation_count == len(model_spans)
+    assert {g.parent.span_id for g in generations} == {spans[name].context.span_id for name in model_spans}
     for generation in generations:
         assert generation.attributes["langfuse.observation.model.name"] == "test-model"
         assert "11" in generation.attributes["langfuse.observation.usage_details"]
@@ -183,11 +195,13 @@ def test_parallel_requests_keep_experts_in_their_own_trace(model_run):
     assert len(roots) == 2 and roots[0].context.trace_id != roots[1].context.trace_id
     for root in roots:
         children = [s for s in result.spans if s.parent and s.parent.span_id == root.context.span_id]
-        assert {s.name for s in children} == {"router", "agent.presale", "agent.consult", "agent.result"}
+        assert {s.name for s in children} == {
+            "router", "agent.presale", "agent.consult", "agent.result", "memory.update",
+        }
         assert all(s.attributes["session.id"] == root.attributes["session.id"] for s in children)
         experts = [s for s in children if s.name in {"agent.presale", "agent.consult"}]
         assert max(s.start_time for s in experts) < min(s.end_time for s in experts)
-    assert len(result.spans) == 18
+    assert len(result.spans) == 20
 
 
 @pytest.mark.parametrize("failure", ["agent.presale", "agent.result"])
@@ -219,6 +233,230 @@ def test_actual_react_steps_include_final_forced_answer(model_run, max_steps, ex
     assert agent.attributes["langfuse.observation.metadata.finish_reasons"] == "tool_calls,stop"
     assert agent.attributes["langfuse.observation.metadata.degraded"] is expected_degraded
     assert result.orchs[0].agents["presale"].tool_manager.aexecute_call_as_message.await_count == 1
+
+
+def test_tool_span_records_failure_envelope_without_arguments_or_result(model_run):
+    result = asyncio.run(model_run(
+        "presale",
+        tool_turn=True,
+        tool_result=(
+            '{"success": false, "error": "PRIVATE_TOOL_RESULT", '
+            '"data": {"result_count": 3}}'
+        ),
+    ))
+    spans = {span.name: span for span in result.spans}
+    tool = spans["tool.get_detail"]
+    agent = spans["agent.presale"]
+    assert tool.parent.span_id == agent.context.span_id
+    assert tool.attributes["langfuse.observation.metadata.status"] == "failed"
+    assert tool.attributes["langfuse.observation.metadata.error_type"] == "ToolResultFailure"
+    assert tool.attributes["langfuse.observation.metadata.tool"] == "get_detail"
+    assert tool.attributes["langfuse.observation.metadata.agent"] == "presale"
+    assert tool.attributes["langfuse.observation.metadata.tool_call_id"] == "private-tool-call"
+    assert agent.attributes["langfuse.observation.metadata.status"] == "degraded"
+    assert spans["pickwise.chat"].attributes[
+        "langfuse.observation.metadata.failure_stage"
+    ] == "tool.get_detail"
+    assert spans["pickwise.chat"].attributes[
+        "langfuse.observation.metadata.error_type"
+    ] == "ToolResultFailure"
+    raw = "".join(span.to_json() for span in result.spans)
+    assert "PRIVATE_TOOL_ARGUMENT" not in raw
+    assert "PRIVATE_TOOL_RESULT" not in raw
+    assert result.orchs[0].agents["presale"].tool_manager.aexecute_call_as_message.await_count == 1
+
+
+def test_memory_failure_degrades_execution_without_losing_answer(model_run):
+    result = asyncio.run(model_run("presale", memory_failure=True))
+    spans = {span.name: span for span in result.spans}
+    assert result.replies == ["PRIVATE_ANSWER"]
+    assert spans["memory.update"].attributes[
+        "langfuse.observation.metadata.memory_status"
+    ] == "failed"
+    assert spans["memory.update"].attributes[
+        "langfuse.observation.metadata.error_type"
+    ] == "RuntimeError"
+    assert spans["pickwise.chat"].attributes[
+        "langfuse.observation.metadata.degraded"
+    ] is True
+    assert spans["pickwise.chat"].attributes[
+        "langfuse.observation.metadata.failure_stage"
+    ] == "memory.update"
+    assert "PRIVATE_MEMORY_FAILURE" not in "".join(span.to_json() for span in result.spans)
+
+
+def test_chat_outcome_separates_degraded_execution_from_valid_answer():
+    from app.services.session_manager import SessionManager
+
+    class Agent:
+        last_failures = [{
+            "stage": "agent:consult",
+            "error_type": "AgentExecutionError",
+            "affects_answer": True,
+        }]
+        last_execution_status = "degraded"
+        last_answer_status = "success"
+
+        async def chat(self, message):
+            return "usable partial answer"
+
+    outcome = asyncio.run(SessionManager.__new__(SessionManager)._chat_agent(Agent(), "question"))
+    assert outcome.failed is True
+    assert outcome.execution_status == "degraded"
+    assert outcome.answer_status == "success"
+    assert outcome.failure_stage == "agent:consult"
+    assert outcome.error_type == "AgentExecutionError"
+
+
+@pytest.mark.parametrize("save_failure", [False, True])
+def test_session_restore_and_save_are_observed_separately(tracing, tmp_path, save_failure):
+    from datetime import datetime, timezone
+
+    from app.identity import SessionIdentity
+    from app.services.session_manager import SessionManager
+    from app.services.session_store import SessionState
+
+    tracer, exporter = tracing
+    identity = SessionIdentity(
+        user_id="22222222-2222-4222-8222-222222222222",
+        session_id="11111111-1111-4111-8111-111111111111",
+    )
+    now = datetime.now(timezone.utc)
+
+    class SessionService:
+        def __init__(self):
+            self.state = SessionState(
+                user_id=identity.user_id, session_id=identity.session_id,
+                title="Trace", summary=None, short_term_memory={}, products={},
+                version=1, status="active", created_at=now, updated_at=now,
+                last_message_at=None,
+            )
+
+        async def create_session(self, user_id):
+            return self.state
+
+        async def get_session(self, user_id, session_id):
+            return self.state
+
+        async def save_session(self, state, *, expected_version=None):
+            if save_failure:
+                raise RuntimeError("PRIVATE_SESSION_SAVE_FAILURE")
+            self.state = state
+            return state
+
+    class Agent:
+        last_failures = []
+        last_execution_status = "success"
+        last_answer_status = "success"
+        summary = None
+        products = {}
+        recommendations = []
+        raw_messages = []
+
+        class Memory:
+            def stm_to_dict(self):
+                return {}
+
+            def restore_stm(self, data):
+                pass
+
+        memory_manager = Memory()
+
+        async def chat(self, message):
+            self.raw_messages.extend([
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": "saved answer"},
+            ])
+            return "saved answer"
+
+    manager = SessionManager(
+        session_dir=tmp_path, factory=lambda _: Agent(),
+        session_service=SessionService(),
+    )
+
+    async def run():
+        with tracer.span("pickwise.chat", user_id=identity.user_id, session_id=identity.session_id):
+            return await manager.chat(identity, "question")
+
+    outcome = asyncio.run(run())
+    tracer.client.flush()
+    spans = {span.name: span for span in exporter.get_finished_spans()}
+    root = spans["pickwise.chat"]
+    restore = spans["conversation.restore"]
+    save = spans["conversation.save"]
+    assert restore.parent.span_id == root.context.span_id
+    assert restore.attributes["langfuse.observation.metadata.agent_initialized"] is True
+    assert restore.attributes["langfuse.observation.metadata.state_restored"] is True
+    assert save.parent.span_id == root.context.span_id
+    if save_failure:
+        assert outcome.persisted is False
+        assert outcome.answer_status == "success"
+        assert outcome.execution_status == "degraded"
+        assert save.attributes["langfuse.observation.metadata.status"] == "failed"
+        assert save.attributes["langfuse.observation.metadata.persistence_status"] == "failed"
+        assert save.attributes["langfuse.observation.metadata.error_type"] == "RuntimeError"
+        assert root.attributes["langfuse.observation.metadata.degraded"] is True
+        raw = "".join(span.to_json() for span in exporter.get_finished_spans())
+        assert "PRIVATE_SESSION_SAVE_FAILURE" not in raw
+    else:
+        assert outcome.persisted is True and outcome.answer_status == "success"
+        assert save.attributes["langfuse.observation.metadata.persistence_status"] == "success"
+
+
+def test_idempotency_check_records_execute_and_replay_without_key(tracing):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from app.api.routes.chat import _check_chat_idempotency
+    from app.identity import SessionIdentity
+    from app.services.idempotency import InMemoryIdempotencyStore
+
+    tracer, exporter = tracing
+    identity = SessionIdentity(user_id=str(uuid4()), session_id=str(uuid4()))
+    body = SimpleNamespace(
+        session_id=identity.session_id,
+        message="PRIVATE_IDEMPOTENCY_MESSAGE",
+        product_refs=[],
+    )
+    store = InMemoryIdempotencyStore()
+
+    async def run():
+        with tracer.span("pickwise.chat", user_id=identity.user_id, session_id=identity.session_id):
+            with production_span(
+                "idempotency.check", status="success", idempotency_status="execute",
+            ) as observation:
+                first = await _check_chat_idempotency(
+                    store, identity, body, "PRIVATE_IDEMPOTENCY_KEY", "request-1", stream=False,
+                )
+                observation.update(idempotency_status=first.status)
+            await store.finish(
+                identity.user_id,
+                identity.session_id,
+                "PRIVATE_IDEMPOTENCY_KEY",
+                first.request_hash,
+                status="succeeded",
+                status_code=200,
+                response={"success": True, "data": {"reply": "private"}},
+            )
+
+            with production_span(
+                "idempotency.check", status="success", idempotency_status="replay",
+            ) as observation:
+                replay = await _check_chat_idempotency(
+                    store, identity, body, "PRIVATE_IDEMPOTENCY_KEY", "request-2", stream=False,
+                )
+                observation.update(idempotency_status=replay.status)
+
+    asyncio.run(run())
+    tracer.client.flush()
+    spans = [span for span in exporter.get_finished_spans() if span.name == "idempotency.check"]
+    assert [span.attributes["langfuse.observation.metadata.idempotency_status"] for span in spans] == [
+        "execute", "replay",
+    ]
+    assert all(span.attributes["langfuse.observation.metadata.status"] == "success" for span in spans)
+    raw = "".join(span.to_json() for span in exporter.get_finished_spans())
+    assert "PRIVATE_IDEMPOTENCY_MESSAGE" not in raw
+    assert "PRIVATE_IDEMPOTENCY_KEY" not in raw
 
 
 def test_offline_eval_context_has_no_production_spans_or_masking(model_run, tracing):

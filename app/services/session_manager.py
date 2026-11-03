@@ -30,6 +30,7 @@ from app.identity import SessionIdentity, SessionOwnershipError, validate_user_i
 from app.services.session_service import SessionService, SessionServiceNotFound
 from app.services.session_store import SessionMessage, SessionState
 from app.services.chat_events import emit
+from app.observability.tracing import production_span, update_current_span
 
 
 class SessionManagerError(Exception):
@@ -64,6 +65,10 @@ class ChatOutcome:
     failed: bool
     persisted: bool
     warnings: tuple[str, ...] = ()
+    execution_status: str = "success"
+    answer_status: str = "success"
+    failure_stage: str | None = None
+    error_type: str | None = None
 
 
 @dataclass
@@ -223,7 +228,14 @@ class SessionManager:
         self, identity: SessionIdentity, message: str,
         product_context: list[dict] | None = None,
     ) -> ChatOutcome:
-        entry = await self._ensure_entry(identity)
+        try:
+            entry = await self._ensure_entry(identity)
+        except Exception as exc:
+            update_current_span(
+                failure_stage="conversation.restore",
+                error_type=type(exc).__name__,
+            )
+            raise
         outcome = await self._run_serialized(
             entry, lambda _agent: self._chat_entry(entry, message, product_context=product_context),
         )
@@ -304,12 +316,35 @@ class SessionManager:
                 if self._closed or entry.closing:
                     raise SessionClosing("窗口正在关闭，请稍后重试")
                 try:
-                    if entry.agent is None:
-                        entry.agent = await asyncio.to_thread(
-                            self._factory, entry.identity,
-                        )
-                        if entry.state is not None:
-                            self._restore_agent_state(entry.agent, entry.state)
+                    with production_span(
+                        "conversation.restore",
+                        status="success",
+                        store=(
+                            "session_service" if self._session_service is not None
+                            else "owned_file"
+                        ),
+                        agent_reused=entry.agent is not None,
+                        agent_initialized=False,
+                        state_restored=False,
+                    ) as observation:
+                        try:
+                            if entry.agent is None:
+                                entry.agent = await asyncio.to_thread(
+                                    self._factory, entry.identity,
+                                )
+                                observation.update(agent_initialized=True)
+                                if entry.state is not None:
+                                    self._restore_agent_state(entry.agent, entry.state)
+                                    observation.update(state_restored=True)
+                            else:
+                                observation.update(agent_reused=True)
+                        except Exception as exc:
+                            observation.update(
+                                status="failed",
+                                error_type=type(exc).__name__,
+                                failure_stage="conversation.restore",
+                            )
+                            raise
                     return await operation(entry.agent)
                 except Exception:
                     if entry.agent is None:
@@ -352,6 +387,35 @@ class SessionManager:
         failures = list(getattr(agent, "last_failures", []))
         failed = any(item.get("affects_answer") for item in failures)
         persisted = not any(item.get("stage") == "persistence" for item in failures)
+        answer_status = getattr(agent, "last_answer_status", None)
+        if answer_status is None:
+            answer_is_valid = isinstance(reply, str) and bool(reply.strip())
+            if failed or not answer_is_valid:
+                answer_status = "failed"
+            else:
+                answer_status = "success"
+
+        execution_status = getattr(agent, "last_execution_status", None)
+        if execution_status is None:
+            if failed and answer_status != "success":
+                execution_status = "failed"
+            elif failed or failures or not persisted:
+                execution_status = "degraded"
+            else:
+                execution_status = "success"
+        if failed and answer_status == "success":
+            execution_status = "degraded"
+        if not persisted and execution_status == "success":
+            execution_status = "degraded"
+
+        failure = None
+        for item in failures:
+            if item.get("affects_answer"):
+                failure = item
+                break
+        if failure is None and failures:
+            failure = failures[0]
+
         warnings = [
             f"{item.get('stage', 'unknown')}_failed".upper()
             for item in failures if not item.get("affects_answer")
@@ -363,6 +427,10 @@ class SessionManager:
             failed=failed,
             persisted=persisted,
             warnings=tuple(warnings),
+            execution_status=execution_status,
+            answer_status=answer_status,
+            failure_stage=failure.get("stage") if failure else None,
+            error_type=failure.get("error_type") if failure else None,
         )
 
     async def _chat_entry(
@@ -374,17 +442,36 @@ class SessionManager:
             entry.save_failed = not outcome.persisted
             return outcome
         emit(events, "status", stage="save", state="running", message="正在保存会话")
-        try:
-            entry.state = await self._persist_agent_state(entry)
-        except Exception:
-            entry.save_failed = True
-            emit(events, "status", stage="save", state="failed", message="会话未保存")
-            return ChatOutcome(
-                reply=outcome.reply,
-                failed=outcome.failed,
-                persisted=False,
-                warnings=outcome.warnings,
-            )
+        with production_span(
+            "conversation.save",
+            store="session_service",
+            status="success",
+            persistence_status="success",
+        ) as observation:
+            try:
+                entry.state = await self._persist_agent_state(entry)
+            except Exception as exc:
+                observation.update(
+                    status="failed",
+                    persistence_status="failed",
+                    error_type=type(exc).__name__,
+                    failure_stage="conversation.save",
+                )
+                entry.save_failed = True
+                emit(events, "status", stage="save", state="failed", message="会话未保存")
+                return ChatOutcome(
+                    reply=outcome.reply,
+                    failed=outcome.failed,
+                    persisted=False,
+                    warnings=outcome.warnings,
+                    execution_status=(
+                        "degraded" if outcome.answer_status == "success" else "failed"
+                    ),
+                    answer_status=outcome.answer_status,
+                    failure_stage=outcome.failure_stage or "conversation.save",
+                    error_type=outcome.error_type or type(exc).__name__,
+                )
+            observation.update(persistence_status="success")
         entry.save_failed = False
         emit(events, "status", stage="save", state="done", message="会话已保存")
         return outcome
