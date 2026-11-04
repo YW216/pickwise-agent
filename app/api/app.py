@@ -237,6 +237,7 @@ def _build_app(*, session_dir: str | Path,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Trace-Id"],
     )
     app.include_router(auth_router)
     app.include_router(sessions_router)

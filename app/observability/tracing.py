@@ -40,7 +40,6 @@ FIELDS = {
     "agent",
     "tool",
     "tool_call_id",
-    "purpose",
     "mode",
     "status",
     "error_type",
@@ -52,19 +51,10 @@ FIELDS = {
     "message_length",
     "answer_length",
     "result_count",
-    "recommendation_count",
     "react_steps",
     "scenarios",
-    "degraded",
     "finish_reason",
     "finish_reasons",
-    "agent_reused",
-    "agent_initialized",
-    "state_restored",
-    "memory",
-    "memory_status",
-    "store",
-    "cache_hit",
     "replayed",
 }
 
@@ -154,10 +144,11 @@ def production_span(name, **fields):
             yield observation
     finally:
         # 子步骤发生降级时逐层通知父节点，最终由聊天根节点给出整体状态。
-        if observation is not None and observation.degraded:
+        if observation is not None and observation.status in {
+            "failed", "degraded", "overflow",
+        }:
             parent.update(
                 status="degraded",
-                degraded=True,
                 failure_stage=observation.failure_stage or name,
                 error_type=observation.error_type,
             )
@@ -285,7 +276,7 @@ class Observation:
         self.sdk = sdk
         self.tracing = tracing
         self.finish_reasons = []
-        self.degraded = False
+        self.status = "success"
         self.failure_stage = None
         self.error_type = None
         self.trace_id = None
@@ -296,10 +287,8 @@ class Observation:
 
     def update(self, **fields):
         """仅更新白名单元数据，不记录异常正文。"""
-        if fields.get("degraded") is True or fields.get("status") in {
-            "failed", "degraded", "overflow",
-        }:
-            self.degraded = True
+        if fields.get("status"):
+            self.status = fields["status"]
         if fields.get("failure_stage"):
             self.failure_stage = fields["failure_stage"]
         if fields.get("error_type"):
@@ -400,10 +389,7 @@ class ProductionTracing:
             with set_production_scope(False):
                 sdk = self.client.start_observation(name=name, metadata=metadata)
             observation = Observation(sdk, tracing=self)
-            observation.degraded = (
-                metadata.get("degraded") is True
-                or metadata.get("status") in {"failed", "degraded", "overflow"}
-            )
+            observation.status = metadata.get("status", "success")
             observation.failure_stage = metadata.get("failure_stage")
             observation.error_type = metadata.get("error_type")
             return observation

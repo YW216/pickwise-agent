@@ -63,7 +63,11 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
     )
     try:
         identity = identity_for(user, body.session_id)
-    except HTTPException:
+    except HTTPException as exc:
+        if trace.trace_id:
+            headers = dict(exc.headers or {})
+            headers["X-Trace-Id"] = trace.trace_id
+            exc.headers = headers
         finish_chat_trace(
             trace,
             idempotency_status="not_used",
@@ -274,8 +278,11 @@ async def _handle_chat(body, request, user, manager, idempotency_key, *, stream=
         task = asyncio.create_task(run())
     request.app.state.stream_tasks.add(task)
     task.add_done_callback(request.app.state.stream_tasks.discard)
+    headers = dict(_SSE_HEADERS)
+    if trace.trace_id:
+        headers["X-Trace-Id"] = trace.trace_id
     return StreamingResponse(
-        _stream_events(events, task), media_type="text/event-stream", headers=_SSE_HEADERS,
+        _stream_events(events, task), media_type="text/event-stream", headers=headers,
     )
 
 

@@ -96,7 +96,7 @@ class Router:
         tokens = [t.strip().lower() for t in raw.replace("，", ",").split(",")]
         valid = {t for t in tokens if t in SCENARIO_ORDER}
         if not valid:
-            update_current_span(status="degraded", degraded=True)
+            update_current_span(status="degraded")
             return [DEFAULT_SCENARIO]
         return [s for s in SCENARIO_ORDER if s in valid]
 

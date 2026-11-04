@@ -176,7 +176,6 @@ class SubAgent:
                     except Exception as exc:
                         observation.update(
                             status="failed",
-                            degraded=True,
                             error_type=type(exc).__name__,
                         )
                         emit(events, "tool.failed", **tool_info, message="工具执行失败")
@@ -206,7 +205,6 @@ class SubAgent:
                             error_type = "ToolResultInvalid"
                         observation.update(
                             status="failed",
-                            degraded=True,
                             error_type=error_type,
                             result_count=result_count,
                         )
@@ -233,7 +231,7 @@ class SubAgent:
                 working.append(tool_msg)
 
         # 兜底调用也计入实际模型步数，并标明已走步数上限降级。
-        update_current_span(react_steps=max_steps + 1, degraded=True, status="degraded")
+        update_current_span(react_steps=max_steps + 1, status="degraded")
         # 兜底策略：超过最大步数时不给工具，让模型基于已有观察给出最终回答
         try:
             response = await self._complete(working, [])

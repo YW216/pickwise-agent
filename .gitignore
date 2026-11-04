@@ -70,3 +70,5 @@ tests/*
 项目学习文档/
 
 app/evaluation/runs_*/
+.dsh-promptet-setting/
+.dsh-prompt-setting/

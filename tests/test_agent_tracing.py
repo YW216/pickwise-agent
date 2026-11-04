@@ -210,7 +210,6 @@ def test_partial_expert_or_result_failure_keeps_answer_and_records_fallback(mode
     spans = {s.name: s for s in result.spans}
     assert result.replies[0].strip()
     assert spans[failure].attributes["langfuse.observation.metadata.error_type"] == "BadRequestError"
-    assert spans["agent.result"].attributes["langfuse.observation.metadata.degraded"] is True
     assert spans["agent.result"].attributes["langfuse.observation.metadata.status"] == "degraded"
     raw = "".join(s.to_json() for s in result.spans)
     assert "PRIVATE_MODEL_FAILURE" not in raw and "PRIVATE_ANSWER" not in raw
@@ -220,7 +219,6 @@ def test_invalid_router_output_marks_default_route_as_degraded(model_run):
     result = asyncio.run(model_run(invalid_route=True))
     router = next(s for s in result.spans if s.name == "router")
     assert router.attributes["langfuse.observation.metadata.scenarios"] == "consult"
-    assert router.attributes["langfuse.observation.metadata.degraded"] is True
     assert router.attributes["langfuse.observation.metadata.status"] == "degraded"
     assert "PRIVATE_INVALID_ROUTE" not in router.to_json()
 
@@ -231,7 +229,9 @@ def test_actual_react_steps_include_final_forced_answer(model_run, max_steps, ex
     agent = next(s for s in result.spans if s.name == "agent.presale")
     assert agent.attributes["langfuse.observation.metadata.react_steps"] == 2
     assert agent.attributes["langfuse.observation.metadata.finish_reasons"] == "tool_calls,stop"
-    assert agent.attributes["langfuse.observation.metadata.degraded"] is expected_degraded
+    assert agent.attributes["langfuse.observation.metadata.status"] == (
+        "degraded" if expected_degraded else "success"
+    )
     assert result.orchs[0].agents["presale"].tool_manager.aexecute_call_as_message.await_count == 1
 
 
@@ -270,15 +270,11 @@ def test_memory_failure_degrades_execution_without_losing_answer(model_run):
     result = asyncio.run(model_run("presale", memory_failure=True))
     spans = {span.name: span for span in result.spans}
     assert result.replies == ["PRIVATE_ANSWER"]
-    assert spans["memory.update"].attributes[
-        "langfuse.observation.metadata.memory_status"
-    ] == "failed"
+    assert spans["memory.update"].attributes["langfuse.observation.metadata.status"] == "failed"
     assert spans["memory.update"].attributes[
         "langfuse.observation.metadata.error_type"
     ] == "RuntimeError"
-    assert spans["pickwise.chat"].attributes[
-        "langfuse.observation.metadata.degraded"
-    ] is True
+    assert spans["pickwise.chat"].attributes["langfuse.observation.metadata.status"] == "degraded"
     assert spans["pickwise.chat"].attributes[
         "langfuse.observation.metadata.failure_stage"
     ] == "memory.update"
@@ -385,8 +381,7 @@ def test_session_restore_and_save_are_observed_separately(tracing, tmp_path, sav
     restore = spans["conversation.restore"]
     save = spans["conversation.save"]
     assert restore.parent.span_id == root.context.span_id
-    assert restore.attributes["langfuse.observation.metadata.agent_initialized"] is True
-    assert restore.attributes["langfuse.observation.metadata.state_restored"] is True
+    assert restore.attributes["langfuse.observation.metadata.status"] == "success"
     assert save.parent.span_id == root.context.span_id
     if save_failure:
         assert outcome.persisted is False
@@ -395,7 +390,7 @@ def test_session_restore_and_save_are_observed_separately(tracing, tmp_path, sav
         assert save.attributes["langfuse.observation.metadata.status"] == "failed"
         assert save.attributes["langfuse.observation.metadata.persistence_status"] == "failed"
         assert save.attributes["langfuse.observation.metadata.error_type"] == "RuntimeError"
-        assert root.attributes["langfuse.observation.metadata.degraded"] is True
+        assert root.attributes["langfuse.observation.metadata.status"] == "degraded"
         raw = "".join(span.to_json() for span in exporter.get_finished_spans())
         assert "PRIVATE_SESSION_SAVE_FAILURE" not in raw
     else:
@@ -499,7 +494,6 @@ def test_transient_router_failure_degrades_without_extra_model_retry(model_run):
     result = asyncio.run(model_run(router_unavailable=True))
     router = next(s for s in result.spans if s.name == "router")
     assert router.attributes["langfuse.observation.metadata.scenarios"] == "consult"
-    assert router.attributes["langfuse.observation.metadata.degraded"] is True
     assert router.attributes["langfuse.observation.metadata.error_type"] == "InternalServerError"
     assert result.generation_count == 2
     assert "PRIVATE_ROUTER_FAILURE" not in "".join(s.to_json() for s in result.spans)
@@ -509,7 +503,6 @@ def test_all_experts_failed_skips_result_model_but_ends_result_span(model_run):
     result = asyncio.run(model_run(failures=("agent.presale", "agent.consult")))
     span = next(s for s in result.spans if s.name == "agent.result")
     assert span.attributes["langfuse.observation.metadata.status"] == "degraded"
-    assert span.attributes["langfuse.observation.metadata.degraded"] is True
     assert result.generation_count == 3
     assert result.replies[0].strip()
     assert "PRIVATE_MODEL_FAILURE" not in "".join(s.to_json() for s in result.spans)

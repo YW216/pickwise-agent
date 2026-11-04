@@ -239,15 +239,12 @@ class MultiAgentOrchestrator:
         if turn_started:
             with production_span(
                 "memory.update",
-                memory="short_term",
                 status="success",
-                memory_status="success",
             ) as observation:
                 memory_enabled = getattr(self.memory_manager, "memory_enabled", True)
                 if not completed or not memory_enabled:
                     observation.update(
                         status="not_executed",
-                        memory_status="not_executed",
                     )
                 else:
                     try:
@@ -255,7 +252,6 @@ class MultiAgentOrchestrator:
                     except Exception as exc:
                         observation.update(
                             status="failed",
-                            memory_status="failed",
                             error_type=type(exc).__name__,
                             failure_stage="memory.update",
                         )
@@ -263,7 +259,7 @@ class MultiAgentOrchestrator:
                         if self.last_answer_status == "success":
                             self.last_execution_status = "degraded"
                     else:
-                        observation.update(memory_status="success")
+                        pass
             if self.persistence_enabled:
                 self._save_safely()
         return reply
@@ -285,7 +281,6 @@ class MultiAgentOrchestrator:
         """本轮只尝试一次落盘；失败保留内存会话与答复，并明确留下诊断记录。"""
         with production_span(
             "conversation.save",
-            store="agent_file",
             status="success",
             persistence_status="success",
         ) as observation:
@@ -352,7 +347,7 @@ class MultiAgentOrchestrator:
         # SDK 已负责 HTTP 层重试，这里不再叠加传输重试，只做瞬时故障降级。
         emit(events, "status", stage="routing", state="running",
              message="正在识别预算、使用场景和关注重点")
-        with production_span("router", status="success", degraded=False) as observation:
+        with production_span("router", status="success") as observation:
             try:
                 scenarios = await self.router.route(user_input, pack.history, summary=pack.summary)
             except Exception as exc:
@@ -361,7 +356,7 @@ class MultiAgentOrchestrator:
                     self._record_failure("router", exc)
                     scenarios = [DEFAULT_SCENARIO]
                     observation.update(
-                        status="degraded", degraded=True, error_type=type(exc).__name__,
+                        status="degraded", error_type=type(exc).__name__,
                     )
                 else:
                     raise
@@ -577,7 +572,7 @@ class MultiAgentOrchestrator:
             # 每个协程各自激活专家节点，并行专家保持同级。
             with production_span(
                 f"agent.{key}", agent=key, mode=mode,
-                status="success", degraded=False, react_steps=0,
+                status="success", react_steps=0,
             ) as observation:
                 agent = self.agents[key]
                 step_id = f"agent:{key}:{uuid4().hex}"
@@ -664,10 +659,10 @@ class MultiAgentOrchestrator:
         partial = any(entry.status != "success" for entry in entries)
         with production_span(
             "agent.result", agent="result", mode="multi",
-            status="degraded" if partial else "success", degraded=partial,
+            status="degraded" if partial else "success",
         ) as observation:
             if not any(entry.status == "success" for entry in entries):
-                observation.update(status="degraded", degraded=True)
+                observation.update(status="degraded")
                 return self._result_fallback(entries)
             try:
                 board_text = render_blackboard(entries, self.tool_result_max_chars)
@@ -696,7 +691,7 @@ class MultiAgentOrchestrator:
                 return content
             except Exception as exc:
                 observation.update(
-                    status="degraded", degraded=True, error_type=type(exc).__name__,
+                    status="degraded", error_type=type(exc).__name__,
                 )
                 self._record_failure("result", exc)
                 return self._result_fallback(entries)

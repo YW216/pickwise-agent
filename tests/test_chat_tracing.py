@@ -1,10 +1,12 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.testing import create_test_app
+from app.config.settings import settings
 from app.services.idempotency import InMemoryIdempotencyStore, hash_request
 from tests.in_memory_auth_store import InMemoryAuthStore
 from tests.test_session_manager import FakeAgent, FactoryRecorder
@@ -17,6 +19,7 @@ class TraceRecord:
     def __init__(self, name, fields):
         self.name = name
         self.fields = fields
+        self.trace_id = uuid4().hex
         self.updates = []
         self.identity = None
         self.ended = False
@@ -322,3 +325,130 @@ def test_sse_disconnect_keeps_trace_open_until_background_save_finishes(tmp_path
             await manager.close()
 
     asyncio.run(run())
+
+
+# ============================================================
+# X-Trace-Id 回传：三条响应路径 + 浏览器可读性
+# ============================================================
+#
+# 根节点的 trace_id 只落在 Langfuse 侧没有意义——用户报障时要能把
+# 一次请求对应到一条 trace。回传必须覆盖三条出口：普通响应、SSE
+# （头要在首个事件之前到）、以及执行前就被拒绝的请求（那些请求恰恰
+# 最需要 trace）。跨域场景另有一条隐藏前提：没有
+# Access-Control-Expose-Headers，浏览器读不到自定义头。
+
+TRACE_ORIGIN = "http://localhost:5173"
+
+
+def _login_with_session(client, email):
+    """注册并建一个窗口，返回写请求所需的 CSRF 头与窗口编号。"""
+    registration = client.post("/api/auth/register", json={
+        "email": email,
+        "password": "test-password-123",
+        "display_name": "Trace",
+    }).json()["data"]
+    headers = {"X-Pickwise-CSRF": registration["csrf_token"]}
+    session_id = client.post(
+        "/api/sessions", json={}, headers=headers,
+    ).json()["data"]["session_id"]
+    return registration["user"], headers, session_id
+
+
+def _tracing_app(tmp_path, monkeypatch):
+    """建一个注入假 TraceRecorder 的隔离应用，返回 (app, tracing)。"""
+    tracing = TraceRecorder()
+    monkeypatch.setattr("app.api.app.ProductionTracing", lambda **kwargs: tracing)
+    app = create_test_app(
+        session_dir=tmp_path,
+        factory=FactoryRecorder(lambda identity: TraceAwareAgent(identity)),
+        idempotency_store=InMemoryIdempotencyStore(),
+        auth_store=InMemoryAuthStore(),
+    )
+    return app, tracing
+
+
+@pytest.mark.parametrize(
+    ("stream", "path"),
+    [(False, "/api/chat"), (True, "/api/chat/stream")],
+)
+def test_chat_response_returns_trace_id_header(tmp_path, monkeypatch, stream, path):
+    """普通响应与 SSE 响应都必须带回本次 trace 的编号。"""
+    app, tracing = _tracing_app(tmp_path, monkeypatch)
+
+    with TestClient(app) as client:
+        _, headers, session_id = _login_with_session(
+            client, f"trace-header-{stream}@example.com",
+        )
+        response = client.post(
+            path,
+            json={"session_id": session_id, "message": "hello"},
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    trace = tracing.records[0]
+    assert trace.ended
+    assert response.headers["X-Trace-Id"] == trace.trace_id
+
+
+def test_sse_trace_id_header_arrives_before_first_event(tmp_path, monkeypatch):
+    """SSE 的头必须先于首个事件到达，否则前端只能在流结束后才拿到编号。"""
+    app, tracing = _tracing_app(tmp_path, monkeypatch)
+
+    with TestClient(app) as client:
+        _, headers, session_id = _login_with_session(client, "trace-sse@example.com")
+        with client.stream(
+            "POST", "/api/chat/stream",
+            json={"session_id": session_id, "message": "hello"},
+            headers=headers,
+        ) as response:
+            # 读任何正文之前先断言头：这正是「首字之前」的含义。
+            assert response.headers["X-Trace-Id"] == tracing.records[0].trace_id
+            frames = [line for line in response.iter_lines() if line.strip()]
+
+    assert frames[0].startswith("event:")
+
+
+def test_cross_origin_response_exposes_trace_id_header(tmp_path, monkeypatch):
+    """跨域下自定义头必须被 expose，否则浏览器读不到（前端静默拿空）。"""
+    monkeypatch.setattr(settings, "allowed_origins", [TRACE_ORIGIN])
+    app, tracing = _tracing_app(tmp_path, monkeypatch)
+
+    with TestClient(app) as client:
+        _, headers, session_id = _login_with_session(client, "trace-cors@example.com")
+        response = client.post(
+            "/api/chat",
+            json={"session_id": session_id, "message": "hello"},
+            headers={**headers, "Origin": TRACE_ORIGIN},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == TRACE_ORIGIN
+    exposed = response.headers["Access-Control-Expose-Headers"].lower()
+    assert "x-trace-id" in exposed
+    assert response.headers["X-Trace-Id"] == tracing.records[0].trace_id
+
+
+def test_rejected_chat_still_returns_trace_id_header(tmp_path, monkeypatch):
+    """执行前就被拒绝的请求同样要能按 trace 编号追溯。
+
+    必须用「长度合法、但不是 UUID」的编号：schema 有 36 位长度约束，
+    短字符串会在进入 handler 之前就被 FastAPI 挡下（那时还没有 trace）。
+    """
+    app, tracing = _tracing_app(tmp_path, monkeypatch)
+
+    with TestClient(app) as client:
+        _, headers, _ = _login_with_session(client, "trace-rejected@example.com")
+        response = client.post(
+            "/api/chat",
+            json={"session_id": "x" * 36, "message": "hello"},
+            headers=headers,
+        )
+
+    assert response.status_code == 422
+    trace = tracing.records[0]
+    assert trace.ended
+    assert response.headers["X-Trace-Id"] == trace.trace_id
+    assert trace.updates[-1]["failure_stage"] == "identity"
+    assert trace.updates[-1]["execution_status"] == "rejected"
+    assert trace.updates[-1]["idempotency_status"] == "not_used"

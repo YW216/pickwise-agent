@@ -319,25 +319,14 @@ class SessionManager:
                     with production_span(
                         "conversation.restore",
                         status="success",
-                        store=(
-                            "session_service" if self._session_service is not None
-                            else "owned_file"
-                        ),
-                        agent_reused=entry.agent is not None,
-                        agent_initialized=False,
-                        state_restored=False,
                     ) as observation:
                         try:
                             if entry.agent is None:
                                 entry.agent = await asyncio.to_thread(
                                     self._factory, entry.identity,
                                 )
-                                observation.update(agent_initialized=True)
                                 if entry.state is not None:
                                     self._restore_agent_state(entry.agent, entry.state)
-                                    observation.update(state_restored=True)
-                            else:
-                                observation.update(agent_reused=True)
                         except Exception as exc:
                             observation.update(
                                 status="failed",
@@ -444,7 +433,6 @@ class SessionManager:
         emit(events, "status", stage="save", state="running", message="正在保存会话")
         with production_span(
             "conversation.save",
-            store="session_service",
             status="success",
             persistence_status="success",
         ) as observation:
