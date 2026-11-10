@@ -1,13 +1,21 @@
+"""Langfuse 封装的唯一入口：业务代码只需要认识 production_span、update_current_span
+和 ProductionTracing。
 
-"""简单的 Langfuse 封装，不在这里安装聊天埋点。
+文件按依赖顺序排列（底层在前），想按概念理解，按下面的顺序跳读：
 
-只有显式进入生产环境追踪范围时才进行数据脱敏；
-离线评测不受影响。
+1. 两个 ContextVar：当前在哪个节点、是否处于生产追踪
+2. production_span 与 update_current_span：业务调用方只用这两个
+3. Observation 与 ProductionTracing：节点对象与它的管理器
+4. activate_observation：把节点接进 SDK 的上下文，唯一需要懂 SDK 的地方
+5. filter_metadata 与三个 mask 函数：导出前的脱敏
 
-SDK 的导出钩子也可能在其他线程中执行，
-因此导出时通过 Span 属性判断环境，而不是依赖 ContextVar。
+两条贯穿全局的约束：
 
-Web 服务启动后、处理模型请求前，应完成实例初始化。
+- 追踪出任何问题都不能影响业务：SDK 抛错一律吞掉，业务照常执行。
+- 关闭追踪时所有调用退化为空操作：调用方不需要判断追踪有没有开。
+
+SDK 的导出钩子可能在其他线程执行，所以判断"是不是生产环境"读的是 Span 属性，
+不是协程里的 ContextVar。Web 服务启动后、处理模型请求前完成初始化。
 """
 
 from __future__ import annotations
@@ -30,12 +38,12 @@ production_scope = ContextVar(
 # 当前生产节点随协程传播，供 Router 和专家创建子节点、更新安全元数据。
 current_observation = ContextVar("pickwise_current_observation", default=None)
 
-# 生产环境来源标识
-SOURCE = "pickwise_source"
+# 生产环境来源标识：导出钩子靠它区分生产与离线评测。
+PRODUCTION_SOURCE_KEY = "pickwise_source"
 
-# 允许记录的元数据字段白名单
-FIELDS = {
-    SOURCE,
+# 允许记录的元数据白名单；不在表里的键一律丢弃。
+ALLOWED_METADATA_FIELDS = {
+    PRODUCTION_SOURCE_KEY,
     "request_id",
     "agent",
     "tool",
@@ -113,7 +121,7 @@ def activate_observation(observation, *, user_id=None, session_id=None):
             contexts.enter_context(propagate_attributes(
                 user_id=user_id,
                 session_id=session_id,
-                metadata={SOURCE: "production"},
+                metadata={PRODUCTION_SOURCE_KEY: "production"},
             ))
         except Exception:
             # SDK 上下文不可用时，业务仍在脱敏范围内执行一次。
@@ -131,27 +139,18 @@ def activate_observation(observation, *, user_id=None, session_id=None):
 
 @contextmanager
 def production_span(name, **fields):
-    """只在生产聊天链路中创建子节点，其他调用直接空跑。"""
+    """只在生产聊天链路中创建子节点，其他调用直接空跑。
+
+    这里只做守卫：没开追踪、没有父节点、父节点没有客户端时，给调用方一个
+    空对象。建节点、激活、结束、失败上报都在 ProductionTracing.span 里。
+    """
     parent = current_observation.get()
     if not production_scope.get() or parent is None or parent.tracing is None:
-        observation = Observation()
-        yield observation
+        yield Observation()
         return
 
-    observation = None
-    try:
-        with parent.tracing.span(name, **fields) as observation:
-            yield observation
-    finally:
-        # 子步骤发生降级时逐层通知父节点，最终由聊天根节点给出整体状态。
-        if observation is not None and observation.status in {
-            "failed", "degraded", "overflow",
-        }:
-            parent.update(
-                status="degraded",
-                failure_stage=observation.failure_stage or name,
-                error_type=observation.error_type,
-            )
+    with parent.tracing.span(name, **fields) as observation:
+        yield observation
 
 
 def update_current_span(**fields):
@@ -165,12 +164,12 @@ def update_current_span(**fields):
 # 3. 元数据处理和数据脱敏
 # ============================================================
 
-def get_metadata(data):
-    """只保留白名单中的基础类型元数据。"""
+def filter_metadata(data):
+    """按白名单过滤元数据：不在表里的键、非基础类型的值都丢掉。"""
     metadata = {}
 
     for key, value in data.items():
-        if key not in FIELDS:
+        if key not in ALLOWED_METADATA_FIELDS:
             continue
 
         if not isinstance(value, (str, int, float, bool)):
@@ -198,7 +197,7 @@ def mask_content(*, data, **kwargs):
 def is_production_span(attributes):
     """只读取 Span 属性；后台导出线程不能依赖协程 ContextVar。"""
     for kind in ("trace", "observation"):
-        key = f"langfuse.{kind}.metadata.{SOURCE}"
+        key = f"langfuse.{kind}.metadata.{PRODUCTION_SOURCE_KEY}"
 
         if attributes.get(key) == "production":
             return True
@@ -252,7 +251,7 @@ def mask_otel_spans(params):
             if ".metadata." in key:
                 metadata_field = key.rsplit(".metadata.", 1)[-1]
 
-                if metadata_field in FIELDS:
+                if metadata_field in ALLOWED_METADATA_FIELDS:
                     continue
 
             # 其他属性全部删除
@@ -302,7 +301,7 @@ class Observation:
             if fields.get("error_type"):
                 level = "ERROR"
 
-            metadata = get_metadata(fields)
+            metadata = filter_metadata(fields)
             # 保存本节点内每次模型调用的固定结束原因，避免 ReAct 后续步骤覆盖前一步。
             if "finish_reason" in metadata:
                 self.finish_reasons.append(metadata["finish_reason"])
@@ -382,8 +381,8 @@ class ProductionTracing:
             return Observation()
 
         try:
-            metadata = get_metadata(fields)
-            metadata[SOURCE] = "production"
+            metadata = filter_metadata(fields)
+            metadata[PRODUCTION_SOURCE_KEY] = "production"
 
             # 固化生产标记供后台导出读取，避免它被运行时脱敏器屏蔽。
             with set_production_scope(False):
@@ -405,8 +404,12 @@ class ProductionTracing:
         session_id=None,
         **fields,
     ):
-        """创建并管理一个 Observation 的完整生命周期。"""
-        # 创建 Observation
+        """创建并管理一个 Observation 的完整生命周期。
+
+        离开时如果节点处于失败/降级/溢出状态，把父节点一并标成降级——
+        每一层都这么做，状态就沿着调用栈冒到根节点。
+        """
+        parent = current_observation.get()
         observation = self.start(name, **fields)
 
         try:
@@ -429,6 +432,14 @@ class ProductionTracing:
         finally:
             # 无论成功还是失败，都结束 Observation
             observation.end()
+            if parent is not None and observation.status in {
+                "failed", "degraded", "overflow",
+            }:
+                parent.update(
+                    status="degraded",
+                    failure_stage=observation.failure_stage or name,
+                    error_type=observation.error_type,
+                )
 
     async def aclose(self):
         """将尚未上报的追踪数据刷新到 Langfuse。"""

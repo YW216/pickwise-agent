@@ -66,6 +66,7 @@ tests/*
 !tests/test_agent_tracing.py
 !tests/test_chat_tracing.py
 !tests/test_public_text.py
+!tests/test_action_repo.py
 
 项目学习文档/
 
